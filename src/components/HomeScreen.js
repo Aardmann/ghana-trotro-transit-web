@@ -326,7 +326,7 @@ const GhanaTrotroTransit = () => {
     
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(user.email,{
-        redirectTo: "https://ghanatrotrotransit.netlify.app/reset-password"
+        redirectTo: "https://ghanatrotrotransit.netlify.app/reset-password/"
       });
       if (error) throw error;
       
