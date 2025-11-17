@@ -518,7 +518,7 @@ const GhanaTrotroTransit = () => {
       <div className="scroll-view">
         <div className="sheet-header">
           <div className="header-content">
-            <h1 className="app-title">Ghana Trotro Transit</h1>
+            <h1 className="app-title">Ghana Trotro Transit -web</h1>
             <p className="app-subtitle">Find your perfect trotro route</p>
           </div>
           <button 
@@ -649,7 +649,7 @@ const GhanaTrotroTransit = () => {
             {!user ? (
               <>
                 <Lock size={20} color="#FFFFFF" />
-                <span className="search-button-text">Wadup to Search</span>
+                <span className="search-button-text">Sign In to Search</span>
               </>
             ) : (
               <>
