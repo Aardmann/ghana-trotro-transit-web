@@ -1,0 +1,92 @@
+.map-container {
+  width: 100%;
+  height: 100vh;
+  position: relative;
+}
+
+/* Custom marker styles for Leaflet */
+.custom-marker {
+  background: #6b21a8;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.start-marker {
+  background: #10B981 !important;
+}
+
+.end-marker {
+  background: #EF4444 !important;
+}
+
+/* Hide routing instructions panel */
+.leaflet-routing-container {
+  display: none !important;
+}
+
+/* Custom popup styles */
+.leaflet-popup-content {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+}
+
+
+.map-container {
+  width: 100%;
+  height: 100vh;
+  position: relative;
+  /* Prevent repaints and ensure smooth rendering */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000;
+  will-change: transform;
+}
+
+/* Ensure Leaflet containers are stable */
+.leaflet-container {
+  background: #f8f9fa;
+  /* Prevent GPU layer creation issues */
+  transform: translateZ(0);
+}
+
+/* Custom marker styles for Leaflet */
+.custom-marker {
+  background: #6b21a8;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.start-marker {
+  background: #10B981 !important;
+}
+
+.end-marker {
+  background: #EF4444 !important;
+}
+
+/* Hide routing instructions panel */
+.leaflet-routing-container {
+  display: none !important;
+}
+
+/* Custom popup styles */
+.leaflet-popup-content {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+}
