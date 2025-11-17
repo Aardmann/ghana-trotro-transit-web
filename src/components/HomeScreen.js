@@ -518,7 +518,7 @@ const GhanaTrotroTransit = () => {
       <div className="scroll-view">
         <div className="sheet-header">
           <div className="header-content">
-            <h1 className="app-title">Ghana Trotro Transit -web</h1>
+            <h1 className="app-title">Ghana Trotro Transit</h1>
             <p className="app-subtitle">Find your perfect trotro route</p>
           </div>
           <button 
