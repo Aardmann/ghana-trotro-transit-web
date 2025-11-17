@@ -543,15 +543,25 @@ body {
     gap: 12px;
   }
 
+  .profile-button{
+    top:70px;
+    z-index: 100;
+  }
+
+  .plus-button{
+    top:130px;
+    z-index: 1;
+  }
+
   /* Bottom Sheet Styles */
 .bottom-sheet-overlay {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
   background-color: rgba(0,0,0,0.5);
-  z-index: 1001;
+  z-index: 10000;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1211,7 +1221,7 @@ body {
 .plus-button,
 .info-button,
 .floating-button {
-  z-index: 1002;
+  z-index: 1000;
 }
 
 .modal-overlay {
@@ -1234,7 +1244,7 @@ body {
   right: 0;
   bottom: 0;
   background-color: rgba(0,0,0,0.4);
-  z-index: 1001;
+z-index: 1002;
   display: flex;
   align-items: flex-end;
   justify-content: center;

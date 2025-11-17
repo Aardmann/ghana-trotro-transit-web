@@ -649,7 +649,7 @@ const GhanaTrotroTransit = () => {
             {!user ? (
               <>
                 <Lock size={20} color="#FFFFFF" />
-                <span className="search-button-text">Sign In to Search</span>
+                <span className="search-button-text">Wadup to Search</span>
               </>
             ) : (
               <>
