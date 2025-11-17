@@ -9,12 +9,13 @@ import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
 
-const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
+const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -31,6 +32,30 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
       await onSignUp(email, password, firstName, lastName);
     } else {
       await onSignIn(email, password);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      alert('Please enter your email address to reset password');
+      return;
+    }
+
+    setForgotPasswordLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
+    });
+
+    if (error) throw error;
+    
+    alert(
+      `Password Reset Email Sent', Check your email (${email}) for the password reset link. The link will expire in 24 hours.`
+    );
+    } catch (error) {
+      alert(`Error sending reset email. Please try again.,${error.message}`);
+    } finally {
+      setForgotPasswordLoading(false);
     }
   };
 
@@ -96,6 +121,16 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
       >
         {authLoading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
       </button>
+
+      {!isSignUp && (
+        <button 
+          className="auth-forgot-password"
+          onClick={handleForgotPassword}
+          disabled={forgotPasswordLoading}
+        >
+          {forgotPasswordLoading ? 'Sending...' : 'Forgot Password?'}
+        </button>
+      )}
       
       <button 
         className="auth-switch"
