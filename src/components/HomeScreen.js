@@ -1014,6 +1014,16 @@ const GhanaTrotroTransit = () => {
                   </div>
                 </div>
               </div>
+
+              <div className="info-section">
+                <h3 className="info-section-title">Contact & Support</h3>
+                <div className="contact-list">
+                  <div className="contact-item">
+                    <Info size={20} color={COLORS.primary} />
+                    <span className="contact-text">Please prices may vary, carry extra change on you as you commute. Happy trotro-ing!</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
