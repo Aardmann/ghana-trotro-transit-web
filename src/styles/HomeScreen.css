@@ -958,7 +958,7 @@ body {
 
 /* Non-blocking Modal Overlay */
 .modal-overlay.non-blocking {
-  pointer-events: none;
+  /* pointer-events: none;  */
 }
 
 .modal-overlay.non-blocking .modal {
@@ -1482,14 +1482,14 @@ z-index: 1002;
 .route-summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 24px;
 }
 
 .summary-card {
   background: white;
   border-radius: 16px;
-  padding: 20px;
+  padding: 10px;
   border: 1px solid #F1F5F9;
   display: flex;
   align-items: center;
