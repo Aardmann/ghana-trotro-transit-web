@@ -172,6 +172,8 @@ const GhanaTrotroTransit = () => {
   // Refs
   const startInputRef = useRef(null);
   const destinationInputRef = useRef(null);
+  const bottomSheetRef = useRef(null);
+  const modalRef = useRef(null);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -188,6 +190,33 @@ const GhanaTrotroTransit = () => {
     }
     return MAP_CONFIG.center;
   }, [memoizedRouteCoordinates]);
+
+  // Close modals when clicking outside
+  const handleOverlayClick = useCallback((e, closeFunction) => {
+    if (e.target === e.currentTarget) {
+      closeFunction();
+    }
+  }, []);
+
+  // Close bottom sheet when clicking on overlay
+  const handleBottomSheetOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, closeBottomSheet);
+  }, [handleOverlayClick]);
+
+  // Close profile modal when clicking on overlay
+  const handleProfileModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowProfileModal(false));
+  }, [handleOverlayClick]);
+
+  // Close info modal when clicking on overlay
+  const handleInfoModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowInfoModal(false));
+  }, [handleOverlayClick]);
+
+  // Close search history modal when clicking on overlay
+  const handleSearchHistoryModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowSearchHistoryModal(false));
+  }, [handleOverlayClick]);
 
   // Check user on component mount
   const checkUser = useCallback(async () => {
@@ -861,8 +890,11 @@ const GhanaTrotroTransit = () => {
 
       {/* Bottom Sheet - Slides up from bottom */}
       {showBottomSheet && (
-        <div className="bottom-sheet-overlay">
-          <div className="bottom-sheet">
+        <div 
+          className="bottom-sheet-overlay"
+          onClick={handleBottomSheetOverlayClick}
+        >
+          <div className="bottom-sheet" ref={bottomSheetRef}>
             <div className="bottom-sheet-content">
               {bottomSheetContent === 'search' ? renderSearchForm() : renderRouteDetails()}
             </div>
@@ -884,8 +916,11 @@ const GhanaTrotroTransit = () => {
 
       {/* Profile Modal - Non-blocking */}
       {showProfileModal && (
-        <div className="modal-overlay non-blocking">
-          <div className="modal">
+        <div 
+          className="modal-overlay non-blocking"
+          onClick={handleProfileModalOverlayClick}
+        >
+          <div className="modal" ref={modalRef}>
             <div className="modal-header">
               <h2 className="modal-title">Profile</h2>
               <button 
@@ -947,8 +982,11 @@ const GhanaTrotroTransit = () => {
 
       {/* Info Modal - Non-blocking */}
       {showInfoModal && (
-        <div className="modal-overlay non-blocking">
-          <div className="modal info-modal">
+        <div 
+          className="modal-overlay non-blocking"
+          onClick={handleInfoModalOverlayClick}
+        >
+          <div className="modal info-modal" ref={modalRef}>
             <div className="modal-header">
               <h2 className="modal-title">About Ghana Trotro Transit</h2>
               <button 
@@ -1031,8 +1069,11 @@ const GhanaTrotroTransit = () => {
 
       {/* Search History Modal - Non-blocking */}
       {showSearchHistoryModal && (
-        <div className="modal-overlay non-blocking">
-          <div className="modal">
+        <div 
+          className="modal-overlay non-blocking"
+          onClick={handleSearchHistoryModalOverlayClick}
+        >
+          <div className="modal" ref={modalRef}>
             <div className="modal-header">
               <h2 className="modal-title">Search History</h2>
               <button 
