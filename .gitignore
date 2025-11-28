@@ -25,3 +25,6 @@ yarn-error.log*
 
 
 #Nketia Nana Yaw Junior
+
+#Supabase keys
+/src/config/supabase.js
