@@ -9,76 +9,6 @@ import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
 
-// Rate limiting configuration
-const RATE_LIMIT_CONFIG = {
-  // Route searches per minute
-  ROUTE_SEARCHES: {
-    MAX_REQUESTS: 10,
-    TIME_WINDOW: 60 * 1000, // 1 minute in milliseconds
-  },
-  // User info fetches per minute
-  USER_INFO: {
-    MAX_REQUESTS: 20,
-    TIME_WINDOW: 60 * 1000, // 1 minute in milliseconds
-  },
-  // Suggestions per minute
-  SUGGESTIONS: {
-    MAX_REQUESTS: 30,
-    TIME_WINDOW: 60 * 1000, // 1 minute in milliseconds
-  }
-};
-
-// Rate limit store
-const rateLimitStore = new Map();
-
-const checkRateLimit = (userId, endpoint) => {
-  const now = Date.now();
-  const key = `${userId}_${endpoint}`;
-  
-  if (!rateLimitStore.has(key)) {
-    rateLimitStore.set(key, {
-      count: 1,
-      firstRequest: now,
-      lastRequest: now
-    });
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG[endpoint].MAX_REQUESTS - 1 };
-  }
-
-  const userLimit = rateLimitStore.get(key);
-  const timeWindow = RATE_LIMIT_CONFIG[endpoint].TIME_WINDOW;
-
-  // Reset counter if time window has passed
-  if (now - userLimit.firstRequest > timeWindow) {
-    userLimit.count = 1;
-    userLimit.firstRequest = now;
-    userLimit.lastRequest = now;
-    rateLimitStore.set(key, userLimit);
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG[endpoint].MAX_REQUESTS - 1 };
-  }
-
-  // Check if within rate limit
-  if (userLimit.count < RATE_LIMIT_CONFIG[endpoint].MAX_REQUESTS) {
-    userLimit.count++;
-    userLimit.lastRequest = now;
-    rateLimitStore.set(key, userLimit);
-    return { 
-      allowed: true, 
-      remaining: RATE_LIMIT_CONFIG[endpoint].MAX_REQUESTS - userLimit.count 
-    };
-  } else {
-    const timeLeft = timeWindow - (now - userLimit.firstRequest);
-    return { 
-      allowed: false, 
-      remaining: 0,
-      retryAfter: Math.ceil(timeLeft / 1000) // seconds
-    };
-  }
-};
-
-const getUserIdForRateLimit = (user) => {
-  return user?.id || 'anonymous';
-};
-
 const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -239,17 +169,9 @@ const GhanaTrotroTransit = () => {
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
   const [searchHistory, setSearchHistory] = useState([]);
 
-  // Rate limit states
-  const [rateLimitInfo, setRateLimitInfo] = useState({
-    routeSearches: { remaining: RATE_LIMIT_CONFIG.ROUTE_SEARCHES.MAX_REQUESTS },
-    suggestions: { remaining: RATE_LIMIT_CONFIG.SUGGESTIONS.MAX_REQUESTS }
-  });
-
   // Refs
   const startInputRef = useRef(null);
   const destinationInputRef = useRef(null);
-  const bottomSheetRef = useRef(null);
-  const modalRef = useRef(null);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -267,44 +189,9 @@ const GhanaTrotroTransit = () => {
     return MAP_CONFIG.center;
   }, [memoizedRouteCoordinates]);
 
-  // Close modals when clicking outside
-  const handleOverlayClick = useCallback((e, closeFunction) => {
-    if (e.target === e.currentTarget) {
-      closeFunction();
-    }
-  }, []);
-
-  // Close bottom sheet when clicking on overlay
-  const handleBottomSheetOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, closeBottomSheet);
-  }, [handleOverlayClick]);
-
-  // Close profile modal when clicking on overlay
-  const handleProfileModalOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, () => setShowProfileModal(false));
-  }, [handleOverlayClick]);
-
-  // Close info modal when clicking on overlay
-  const handleInfoModalOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, () => setShowInfoModal(false));
-  }, [handleOverlayClick]);
-
-  // Close search history modal when clicking on overlay
-  const handleSearchHistoryModalOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, () => setShowSearchHistoryModal(false));
-  }, [handleOverlayClick]);
-
   // Check user on component mount
   const checkUser = useCallback(async () => {
     try {
-      const userId = getUserIdForRateLimit(user);
-      const rateLimit = checkRateLimit(userId, 'USER_INFO');
-      
-      if (!rateLimit.allowed) {
-        console.warn('Rate limit exceeded for user info fetch');
-        return;
-      }
-
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
       
@@ -315,18 +202,11 @@ const GhanaTrotroTransit = () => {
     } catch (error) {
       console.error('Error checking user:', error);
     }
-  }, [user]);
+  }, []);
 
-  // Fetch user profile with rate limiting
+  // Fetch user profile
   const fetchUserProfile = useCallback(async (userId) => {
     try {
-      const rateLimit = checkRateLimit(userId, 'USER_INFO');
-      
-      if (!rateLimit.allowed) {
-        console.warn('Rate limit exceeded for user profile fetch');
-        return;
-      }
-
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -341,16 +221,9 @@ const GhanaTrotroTransit = () => {
     }
   }, []);
 
-  // Fetch user history with rate limiting
+  // Fetch user history
   const fetchUserHistory = useCallback(async (userId) => {
     try {
-      const rateLimit = checkRateLimit(userId, 'USER_INFO');
-      
-      if (!rateLimit.allowed) {
-        console.warn('Rate limit exceeded for user history fetch');
-        return;
-      }
-
       const [createdRoutes, searchHistoryData] = await Promise.all([
         supabase.from('user_created_routes').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
         supabase.from('search_history').select('*').eq('user_id', userId).order('searched_at', { ascending: false })
@@ -382,27 +255,12 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Fetch stop suggestions with rate limiting
+  // Fetch stop suggestions
   const fetchSuggestions = useCallback(async (query, type) => {
     if (query.length < 2) {
       setSuggestions([]);
       return;
     }
-
-    const userId = getUserIdForRateLimit(user);
-    const rateLimit = checkRateLimit(userId, 'SUGGESTIONS');
-    
-    if (!rateLimit.allowed) {
-      console.warn('Rate limit exceeded for suggestions');
-      setSuggestions([]);
-      return;
-    }
-
-    // Update rate limit info
-    setRateLimitInfo(prev => ({
-      ...prev,
-      suggestions: { remaining: rateLimit.remaining }
-    }));
 
     try {
       const { data, error } = await supabase
@@ -426,7 +284,7 @@ const GhanaTrotroTransit = () => {
       );
       setSuggestions(filtered);
     }
-  }, [user]);
+  }, []);
 
   // Authentication functions
   const handleSignIn = useCallback(async (email, password) => {
@@ -513,7 +371,7 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Route finding function with rate limiting
+  // Route finding function
   const findRoutes = useCallback(async () => {
     if (!user) {
       alert('Authentication Required: Please sign in to search for routes');
@@ -525,21 +383,6 @@ const GhanaTrotroTransit = () => {
       alert('Error: Please enter both start and destination points');
       return;
     }
-
-    // Check rate limit for route searches
-    const userId = getUserIdForRateLimit(user);
-    const rateLimit = checkRateLimit(userId, 'ROUTE_SEARCHES');
-    
-    if (!rateLimit.allowed) {
-      alert(`Rate limit exceeded: Please wait ${rateLimit.retryAfter} seconds before searching for routes again.`);
-      return;
-    }
-
-    // Update rate limit info
-    setRateLimitInfo(prev => ({
-      ...prev,
-      routeSearches: { remaining: rateLimit.remaining }
-    }));
 
     setIsLoading(true);
     
@@ -704,7 +547,7 @@ const GhanaTrotroTransit = () => {
   // Check if any modal or bottom sheet is open
   const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal;
 
-  // Render search form with rate limit info
+  // Render search form
   const renderSearchForm = useCallback(() => (
     <div className="search-section">
       <div className="scroll-view">
@@ -743,24 +586,6 @@ const GhanaTrotroTransit = () => {
             <span className="welcome-text">
               Welcome back, {userProfile?.first_name || user.email?.split('@')[0]}! 👋
             </span>
-          </div>
-        )}
-
-        {/* Rate Limit Info Banner */}
-        {user && (
-          <div className="rate-limit-info">
-            <div className="rate-limit-item">
-              <span className="rate-limit-label">Route searches left:</span>
-              <span className={`rate-limit-value ${rateLimitInfo.routeSearches.remaining < 3 ? 'rate-limit-warning' : ''}`}>
-                {rateLimitInfo.routeSearches.remaining}/{RATE_LIMIT_CONFIG.ROUTE_SEARCHES.MAX_REQUESTS}
-              </span>
-            </div>
-            <div className="rate-limit-item">
-              <span className="rate-limit-label">Suggestions left:</span>
-              <span className={`rate-limit-value ${rateLimitInfo.suggestions.remaining < 5 ? 'rate-limit-warning' : ''}`}>
-                {rateLimitInfo.suggestions.remaining}/{RATE_LIMIT_CONFIG.SUGGESTIONS.MAX_REQUESTS}
-              </span>
-            </div>
           </div>
         )}
 
@@ -885,7 +710,7 @@ const GhanaTrotroTransit = () => {
         )}
       </div>
     </div>
-  ), [user, startPoint, destination, suggestions, activeInput, isLoading, showWelcomeBanner, userProfile, rateLimitInfo, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet]);
+  ), [user, startPoint, destination, suggestions, activeInput, isLoading, showWelcomeBanner, userProfile, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet]);
 
   // Render route details
   const renderRouteDetails = useCallback(() => (
@@ -1036,11 +861,8 @@ const GhanaTrotroTransit = () => {
 
       {/* Bottom Sheet - Slides up from bottom */}
       {showBottomSheet && (
-        <div 
-          className="bottom-sheet-overlay"
-          onClick={handleBottomSheetOverlayClick}
-        >
-          <div className="bottom-sheet" ref={bottomSheetRef}>
+        <div className="bottom-sheet-overlay">
+          <div className="bottom-sheet">
             <div className="bottom-sheet-content">
               {bottomSheetContent === 'search' ? renderSearchForm() : renderRouteDetails()}
             </div>
@@ -1062,11 +884,8 @@ const GhanaTrotroTransit = () => {
 
       {/* Profile Modal - Non-blocking */}
       {showProfileModal && (
-        <div 
-          className="modal-overlay non-blocking"
-          onClick={handleProfileModalOverlayClick}
-        >
-          <div className="modal" ref={modalRef}>
+        <div className="modal-overlay non-blocking">
+          <div className="modal">
             <div className="modal-header">
               <h2 className="modal-title">Profile</h2>
               <button 
@@ -1128,11 +947,8 @@ const GhanaTrotroTransit = () => {
 
       {/* Info Modal - Non-blocking */}
       {showInfoModal && (
-        <div 
-          className="modal-overlay non-blocking"
-          onClick={handleInfoModalOverlayClick}
-        >
-          <div className="modal info-modal" ref={modalRef}>
+        <div className="modal-overlay non-blocking">
+          <div className="modal info-modal">
             <div className="modal-header">
               <h2 className="modal-title">About Ghana Trotro Transit</h2>
               <button 
@@ -1215,11 +1031,8 @@ const GhanaTrotroTransit = () => {
 
       {/* Search History Modal - Non-blocking */}
       {showSearchHistoryModal && (
-        <div 
-          className="modal-overlay non-blocking"
-          onClick={handleSearchHistoryModalOverlayClick}
-        >
-          <div className="modal" ref={modalRef}>
+        <div className="modal-overlay non-blocking">
+          <div className="modal">
             <div className="modal-header">
               <h2 className="modal-title">Search History</h2>
               <button 
