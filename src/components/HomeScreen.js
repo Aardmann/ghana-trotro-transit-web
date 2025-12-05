@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { 
   ArrowUpDown, Copy, Info, Lock, MapPin, Navigation, 
   Search, Share2, User, X, Plus, History, Key, 
-  DollarSign, Mail, Phone, Globe, Clock, Map
+  Mail, Phone, Globe, Clock, Map,
+  ChevronLeft, ChevronRight, ArrowLeft, ArrowRight, 
+  Bus, CheckCircle, Calendar, Thermometer, Hash,
+  Tv, Building, Package, AlertCircle, CalendarDays,
+  Wind, Type, RefreshCw, Radio
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
@@ -150,7 +154,6 @@ const GhanaTrotroTransit = () => {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [activeInput, setActiveInput] = useState('start');
-  const [isLoading, setIsLoading] = useState(false);
   
   // User states
   const [user, setUser] = useState(null);
@@ -169,11 +172,26 @@ const GhanaTrotroTransit = () => {
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
   const [searchHistory, setSearchHistory] = useState([]);
 
+  // Realtime states
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [isFindingRoutes, setIsFindingRoutes] = useState(false);
+
   // Refs
   const startInputRef = useRef(null);
   const destinationInputRef = useRef(null);
   const bottomSheetRef = useRef(null);
   const modalRef = useRef(null);
+  const realtimeSubscriptionRef = useRef(null);
+  const routesCacheRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  const [bottomSheetState, setBottomSheetState] = useState('route-details'); 
+  const [showSwipeIndicator, setShowSwipeIndicator] = useState(true);
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const [routeInfoData, setRouteInfoData] = useState(null);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -331,6 +349,10 @@ const GhanaTrotroTransit = () => {
       setShowProfileModal(false);
       setShowWelcomeBanner(true);
       setTimeout(() => setShowWelcomeBanner(false), 5000);
+      
+      // Start realtime subscriptions after sign in
+      setupRealtimeSubscriptions();
+      
       return true;
     } catch (error) {
       alert('Sign In Error: ' + error.message);
@@ -379,6 +401,10 @@ const GhanaTrotroTransit = () => {
       setSelectedRoute(null);
       setSuggestions([]);
       setShowBottomSheet(false);
+      
+      // Stop realtime subscriptions on sign out
+      stopRealtimeSubscriptions();
+      
       alert('Success: Signed out successfully!');
     } catch (error) {
       alert('Error: ' + error.message);
@@ -400,7 +426,308 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Route finding function
+  const fetchRouteInfo = useCallback(async (routeId) => {
+    if (!routeId) {
+      setRouteInfoData(null);
+      return;
+    }
+
+    try {
+      // Try different table names for route info
+      let routeInfo = null;
+      
+      // Try 'route_info' table first
+      const { data: infoData, error: infoError } = await supabase
+        .from('route_info')
+        .select('*')
+        .eq('route_id', routeId)
+        .maybeSingle();
+      
+      if (!infoError && infoData) {
+        routeInfo = infoData;
+      } else {
+        // Try 'route_infos' table (plural)
+        const { data: infosData, error: infosError } = await supabase
+          .from('route_infos')
+          .select('*')
+          .eq('route_id', routeId)
+          .maybeSingle();
+        
+        if (!infosError && infosData) {
+          routeInfo = infosData;
+        } else {
+          // Try 'routes' table for embedded info
+          const { data: routeData, error: routeError } = await supabase
+            .from('routes')
+            .select('description, travel_time_minutes, peak_hours, frequency, vehicle_type, notes, amenities, operating_hours')
+            .eq('id', routeId)
+            .maybeSingle();
+          
+          if (!routeError && routeData) {
+            // Check if any info exists in the route itself
+            const hasInfo = Object.values(routeData).some(value => 
+              value !== null && value !== '' && 
+              (!Array.isArray(value) || value.length > 0) &&
+              (typeof value !== 'object' || Object.keys(value).length > 0)
+            );
+            
+            if (hasInfo) {
+              routeInfo = routeData;
+            }
+          }
+        }
+      }
+      
+      if (routeInfo) {
+        setRouteInfoData({
+          description: routeInfo.description || '',
+          travel_time_minutes: routeInfo.travel_time_minutes || routeInfo.travelTimeMinutes || '',
+          peak_hours: routeInfo.peak_hours || routeInfo.peakHours || '',
+          frequency: routeInfo.frequency || '',
+          vehicle_type: routeInfo.vehicle_type || routeInfo.vehicleType || '',
+          notes: routeInfo.notes || '',
+          amenities: routeInfo.amenities || [],
+          operating_hours: routeInfo.operating_hours || routeInfo.operatingHours || {
+            start: '',
+            end: '',
+            days: []
+          }
+        });
+      } else {
+        setRouteInfoData(null);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching route info:', error);
+      setRouteInfoData(null);
+    }
+  }, []);
+
+  // Setup realtime subscriptions
+  const setupRealtimeSubscriptions = useCallback(() => {
+    if (realtimeSubscriptionRef.current) {
+      supabase.removeChannel(realtimeSubscriptionRef.current);
+    }
+
+    console.log('Setting up realtime subscriptions...');
+
+    // Subscribe to routes changes
+    const routesChannel = supabase
+      .channel('routes-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'routes'
+        },
+        async (payload) => {
+          console.log('Route change detected:', payload);
+          setLastUpdateTime(new Date());
+          
+          // If we have an active search, refresh the routes
+          if (routes.length > 0 && startPoint && destination) {
+            await refreshCurrentRoutes();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'route_stops'
+        },
+        async (payload) => {
+          console.log('Route stop change detected:', payload);
+          setLastUpdateTime(new Date());
+          
+          // If we have an active search, refresh the routes
+          if (routes.length > 0 && startPoint && destination) {
+            await refreshCurrentRoutes();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'stops'
+        },
+        async (payload) => {
+          console.log('Stop change detected:', payload);
+          setLastUpdateTime(new Date());
+          
+          // If we have an active search, refresh the routes
+          if (routes.length > 0 && startPoint && destination) {
+            await refreshCurrentRoutes();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'route_info'
+        },
+        (payload) => {
+          console.log('Route info change detected:', payload);
+          setLastUpdateTime(new Date());
+          
+          // If current route info changed, refresh it
+          if (selectedRoute?.id === payload.new?.route_id || selectedRoute?.id === payload.old?.route_id) {
+            fetchRouteInfo(selectedRoute.id);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'route_infos'
+        },
+        (payload) => {
+          console.log('Route infos change detected:', payload);
+          setLastUpdateTime(new Date());
+          
+          // If current route info changed, refresh it
+          if (selectedRoute?.id === payload.new?.route_id || selectedRoute?.id === payload.old?.route_id) {
+            fetchRouteInfo(selectedRoute.id);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+        setIsRealtimeConnected(status === 'SUBSCRIBED');
+        setConnectionStatus(status);
+        
+        if (status === 'SUBSCRIBED') {
+          setLastUpdateTime(new Date());
+          console.log('✅ Realtime connection established');
+        }
+      });
+
+    realtimeSubscriptionRef.current = routesChannel;
+  }, [routes, startPoint, destination, selectedRoute, fetchRouteInfo]);
+
+  // Ensure session and realtime subscriptions are active when user interacts
+  const ensureConnected = useCallback(async () => {
+    try {
+      // Re-check session and user state
+      await checkUser();
+
+      // If subscriptions are not active, try to re-subscribe
+      if (!realtimeSubscriptionRef.current || connectionStatus !== 'SUBSCRIBED') {
+        setupRealtimeSubscriptions();
+      }
+    } catch (error) {
+      console.error('Error ensuring connection:', error);
+    }
+  }, [checkUser, setupRealtimeSubscriptions, connectionStatus]);
+
+  // Stop realtime subscriptions
+  const stopRealtimeSubscriptions = useCallback(() => {
+    if (realtimeSubscriptionRef.current) {
+      console.log('Stopping realtime subscriptions...');
+      supabase.removeChannel(realtimeSubscriptionRef.current);
+      realtimeSubscriptionRef.current = null;
+      setIsRealtimeConnected(false);
+      setConnectionStatus('disconnected');
+    }
+  }, []);
+
+  // Refresh current routes without UI flicker
+  const refreshCurrentRoutes = useCallback(async () => {
+    try {
+      const { data: routesData, error } = await supabase
+        .from('routes')
+        .select(`
+          *,
+          route_stops(
+            stop_order,
+            fare_to_next,
+            distance_to_next,
+            stops(*)
+          )
+        `)
+        .order('total_fare');
+
+      if (error) throw error;
+
+      if (routesData && routesData.length > 0) {
+        // Filter routes that match current search criteria
+        const matchingRoutes = routesData.filter(route => {
+          if (!route.route_stops || route.route_stops.length === 0) return false;
+          
+          const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
+          const firstStop = sortedStops[0];
+          const lastStop = sortedStops[sortedStops.length - 1];
+          
+          const firstStopName = firstStop.stops.name.toLowerCase();
+          const lastStopName = lastStop.stops.name.toLowerCase();
+          const userStart = startPoint.toLowerCase();
+          const userDest = destination.toLowerCase();
+          
+          const startMatches = firstStopName.includes(userStart) || userStart.includes(firstStopName);
+          const destMatches = lastStopName.includes(userDest) || userDest.includes(lastStopName);
+          
+          return startMatches && destMatches;
+        });
+
+        // Format routes
+        const formattedRoutes = matchingRoutes.map(route => {
+          const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
+          
+          return {
+            id: route.id,
+            name: route.name,
+            total_distance: route.total_distance,
+            total_fare: route.total_fare,
+            stops: sortedStops.map(rs => ({
+              name: rs.stops.name,
+              lat: parseFloat(rs.stops.latitude),
+              lng: parseFloat(rs.stops.longitude),
+              fare_to_next: rs.fare_to_next,
+              distance_to_next: rs.distance_to_next,
+            }))
+          };
+        });
+
+        // Cache routes for comparison
+        const cachedRoutes = routesCacheRef.current;
+        routesCacheRef.current = formattedRoutes;
+
+        // Only update if routes actually changed
+        if (!cachedRoutes || JSON.stringify(cachedRoutes) !== JSON.stringify(formattedRoutes)) {
+          setRoutes(formattedRoutes);
+          console.log('Routes updated:', formattedRoutes.length, 'routes found');
+        }
+
+        // Update selected route if it still exists
+        if (selectedRoute && formattedRoutes.length > 0) {
+          const currentSelectedRoute = formattedRoutes.find(r => r.id === selectedRoute.id);
+          if (currentSelectedRoute) {
+            // Only update if selected route changed
+            if (JSON.stringify(selectedRoute) !== JSON.stringify(currentSelectedRoute)) {
+              setSelectedRoute(currentSelectedRoute);
+              console.log('Selected route updated');
+            }
+          } else {
+            // If current selected route no longer exists, select the first one
+            setSelectedRoute(formattedRoutes[0]);
+            console.log('Selected route changed to first available');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing routes:', error);
+    }
+  }, [startPoint, destination, selectedRoute]);
+
+  // Update the findRoutes function
   const findRoutes = useCallback(async () => {
     if (!user) {
       alert('Authentication Required: Please sign in to search for routes');
@@ -413,15 +740,16 @@ const GhanaTrotroTransit = () => {
       return;
     }
 
-    setIsLoading(true);
-    
+    // Indicate that route search is in progress
+    setIsFindingRoutes(true);
+
     // Save to search history
     await saveSearchHistory(startPoint, destination);
-    
+
     try {
       console.log('Searching for routes from:', startPoint, 'to:', destination);
       
-      // Fetch routes from Supabase with related stops
+      // Fetch routes with stops
       const { data: routesData, error } = await supabase
         .from('routes')
         .select(`
@@ -444,7 +772,6 @@ const GhanaTrotroTransit = () => {
 
       if (!routesData || routesData.length === 0) {
         alert('No routes found in database');
-        setIsLoading(false);
         return;
       }
 
@@ -452,10 +779,7 @@ const GhanaTrotroTransit = () => {
       const matchingRoutes = routesData.filter(route => {
         if (!route.route_stops || route.route_stops.length === 0) return false;
         
-        // Sort stops by stop_order
         const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
-        
-        // Check if first stop matches user's start point
         const firstStop = sortedStops[0];
         const lastStop = sortedStops[sortedStops.length - 1];
         
@@ -464,7 +788,6 @@ const GhanaTrotroTransit = () => {
         const userStart = startPoint.toLowerCase();
         const userDest = destination.toLowerCase();
         
-        // Check for partial matches
         const startMatches = firstStopName.includes(userStart) || userStart.includes(firstStopName);
         const destMatches = lastStopName.includes(userDest) || userDest.includes(lastStopName);
         
@@ -475,7 +798,6 @@ const GhanaTrotroTransit = () => {
 
       if (matchingRoutes.length === 0) {
         alert(`No direct routes found from ${startPoint} to ${destination}. Try different stops.`);
-        setIsLoading(false);
         return;
       }
 
@@ -498,22 +820,28 @@ const GhanaTrotroTransit = () => {
         };
       });
 
+      // Cache routes
+      routesCacheRef.current = formattedRoutes;
       setRoutes(formattedRoutes);
       
       // Auto-select the first route
       const firstRoute = formattedRoutes[0];
       setSelectedRoute(firstRoute);
       
+      // Fetch route info for the selected route
+      await fetchRouteInfo(firstRoute.id);
+      
       setBottomSheetContent('route');
       setShowBottomSheet(true);
+      setLastUpdateTime(new Date());
       
     } catch (error) {
       console.error('Error finding routes:', error);
       alert('Error searching for routes. Please try again.');
     } finally {
-      setIsLoading(false);
+      setIsFindingRoutes(false);
     }
-  }, [user, startPoint, destination, saveSearchHistory]);
+  }, [user, startPoint, destination, saveSearchHistory, fetchRouteInfo]);
 
   const swapLocations = useCallback(() => {
     const temp = startPoint;
@@ -529,24 +857,95 @@ const GhanaTrotroTransit = () => {
     setSuggestions([]);
     setShowBottomSheet(true);
     setBottomSheetContent('search');
+    routesCacheRef.current = null;
   }, []);
 
   const closeBottomSheet = useCallback(() => {
     setShowBottomSheet(false);
+    setBottomSheetState('route-details');
+    setShowSwipeIndicator(true);
   }, []);
 
   const showRouteDetails = useCallback(() => {
     if (selectedRoute) {
-      setBottomSheetContent('route');
+      setBottomSheetState('route-details');
       setShowBottomSheet(true);
+      setShowSwipeIndicator(true);
     } else {
       setBottomSheetContent('search');
       setShowBottomSheet(true);
     }
   }, [selectedRoute]);
 
+  const handleTouchStart = (e) => {
+    const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+    setTouchStart(clientX);
+  };
+
+  const handleTouchMove = (e) => {
+    const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+    setTouchEnd(clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStart === null || touchEnd === null) {
+      setTouchStart(null);
+      setTouchEnd(null);
+      return;
+    }
+
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > 50; // Minimum distance for swipe
+    const isRightSwipe = distance < -50;
+
+    // Only respond to swipes when bottom sheet is showing route content
+    if (bottomSheetContent === 'route') {
+      if (isLeftSwipe) {
+        setBottomSheetState('route-info');
+        setShowSwipeIndicator(false);
+      }
+
+      if (isRightSwipe) {
+        setBottomSheetState('route-details');
+        setShowSwipeIndicator(false);
+      }
+    }
+
+    setTouchStart(null);
+    setTouchEnd(null);
+  };
+
+  // Pointer event fallbacks for desktop / trackpad
+  const handlePointerDown = (e) => {
+    setTouchStart(e.clientX);
+  };
+
+  const handlePointerMove = (e) => {
+    setTouchEnd(e.clientX);
+  };
+
+  const handlePointerUp = () => {
+    handleTouchEnd();
+  };
+
+  const toggleBottomSheetContent = () => {
+    setBottomSheetState(prev => 
+      prev === 'route-details' ? 'route-info' : 'route-details'
+    );
+    setShowSwipeIndicator(false);
+  };
+
+  const handleIndicatorClick = () => {
+    toggleBottomSheetContent();
+    setShowSwipeIndicator(false);
+  };
+
+  // Check if any modal or bottom sheet is open
+  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal;
+
   // Effects
   useEffect(() => {
+    isMountedRef.current = true;
     checkUser();
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -560,23 +959,107 @@ const GhanaTrotroTransit = () => {
         if (event === 'SIGNED_IN') {
           setShowWelcomeBanner(true);
           setTimeout(() => setShowWelcomeBanner(false), 5000);
+          // Setup realtime subscriptions after sign in
+          setupRealtimeSubscriptions();
         }
       } else {
         setUserProfile(null);
         setCreatedRoutesHistory([]);
         setSearchHistory([]);
+        // Stop realtime subscriptions on sign out
+        stopRealtimeSubscriptions();
       }
     });
 
+    // Setup realtime subscriptions on mount
+    setupRealtimeSubscriptions();
+
+    // Set initial update time
+    setLastUpdateTime(new Date());
+
     return () => {
+      isMountedRef.current = false;
       subscription?.unsubscribe();
+      stopRealtimeSubscriptions();
     };
-  }, [checkUser, fetchUserProfile, fetchUserHistory]);
+  }, [checkUser, fetchUserProfile, fetchUserHistory, setupRealtimeSubscriptions, stopRealtimeSubscriptions]);
 
-  // Check if any modal or bottom sheet is open
-  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal;
+  // When app regains focus or becomes visible again, ensure we reconnect
+  // and refresh current data without resetting user input or UI state.
+  useEffect(() => {
+    let isActive = true;
+    const lastFocusRef = { current: 0 };
 
-  // Render search form
+    const handleFocus = async () => {
+      try {
+        // avoid rapid repeated calls
+        const now = Date.now();
+        if (now - lastFocusRef.current < 800) return;
+        lastFocusRef.current = now;
+
+        await ensureConnected();
+
+        // Refresh user data quietly
+        if (user) {
+          try {
+            await fetchUserProfile(user.id);
+            await fetchUserHistory(user.id);
+          } catch (err) {
+            console.warn('Could not refresh user profile/history on focus:', err);
+          }
+        }
+
+        // If there was an active search or routes present, refresh them
+        if (startPoint && destination) {
+          try {
+            await refreshCurrentRoutes();
+          } catch (err) {
+            console.warn('Error refreshing routes on focus:', err);
+          }
+        } else if (routes.length > 0) {
+          try {
+            await refreshCurrentRoutes();
+          } catch (err) {
+            console.warn('Error refreshing routes on focus:', err);
+          }
+        }
+
+        // Refresh selected route info if visible
+        if (selectedRoute) {
+          try {
+            await fetchRouteInfo(selectedRoute.id);
+          } catch (err) {
+            console.warn('Error fetching route info on focus:', err);
+          }
+        }
+      } catch (error) {
+        console.error('Error handling app focus/visibility:', error);
+      }
+    };
+
+    const visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        handleFocus();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', visibilityHandler);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', visibilityHandler);
+    };
+  }, [ensureConnected, user, startPoint, destination, routes, selectedRoute, fetchUserProfile, fetchUserHistory, refreshCurrentRoutes, fetchRouteInfo]);
+
+  useEffect(() => {
+    if (selectedRoute) {
+      fetchRouteInfo(selectedRoute.id);
+    }
+  }, [selectedRoute, fetchRouteInfo]);
+
+  // Render search form with realtime indicator
   const renderSearchForm = useCallback(() => (
     <div className="search-section">
       <div className="scroll-view">
@@ -585,12 +1068,14 @@ const GhanaTrotroTransit = () => {
             <h1 className="app-title">Ghana Trotro Transit</h1>
             <p className="app-subtitle">Find your perfect trotro route</p>
           </div>
-          <button 
-            className="close-button"
-            onClick={closeBottomSheet}
-          >
-            <X size={20} color={COLORS.text} />
-          </button>
+          <div className="header-actions">
+            <button 
+              className="close-button"
+              onClick={closeBottomSheet}
+            >
+              <X size={20} color={COLORS.text} />
+            </button>
+          </div>
         </div>
         
         {!user && (
@@ -618,6 +1103,7 @@ const GhanaTrotroTransit = () => {
           </div>
         )}
 
+      
         <div className="search-card">
           <div className="input-row">
             <div className="input-container">
@@ -633,6 +1119,7 @@ const GhanaTrotroTransit = () => {
                   setStartPoint(e.target.value);
                   setActiveInput('start');
                   if (user) {
+                    ensureConnected();
                     fetchSuggestions(e.target.value, 'start');
                   }
                 }}
@@ -643,6 +1130,7 @@ const GhanaTrotroTransit = () => {
                     return;
                   }
                   setActiveInput('start');
+                  ensureConnected();
                 }}
               />
             </div>
@@ -668,6 +1156,7 @@ const GhanaTrotroTransit = () => {
                   setDestination(e.target.value);
                   setActiveInput('destination');
                   if (user) {
+                    ensureConnected();
                     fetchSuggestions(e.target.value, 'destination');
                   }
                 }}
@@ -678,6 +1167,7 @@ const GhanaTrotroTransit = () => {
                     return;
                   }
                   setActiveInput('destination');
+                  ensureConnected();
                 }}
               />
             </div>
@@ -706,9 +1196,9 @@ const GhanaTrotroTransit = () => {
           )}
 
           <button 
-            className={`search-button ${(!user || isLoading) ? 'search-button-disabled' : ''}`} 
+            className={`search-button ${!user ? 'search-button-disabled' : ''} ${isFindingRoutes ? 'search-button-loading' : ''}`} 
             onClick={findRoutes}
-            disabled={!user || isLoading}
+            disabled={!user || isFindingRoutes}
           >
             {!user ? (
               <>
@@ -717,10 +1207,17 @@ const GhanaTrotroTransit = () => {
               </>
             ) : (
               <>
-                <Search size={20} color="#FFFFFF" />
-                <span className="search-button-text">
-                  {isLoading ? 'Finding Routes...' : 'Find Routes'}
-                </span>
+                {isFindingRoutes ? (
+                  <>
+                    <RefreshCw size={20} color="#FFFFFF" />
+                    <span className="search-button-text">Finding routes...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search size={20} color="#FFFFFF" />
+                    <span className="search-button-text">Find Routes</span>
+                  </>
+                )}
               </>
             )}
           </button>
@@ -739,11 +1236,14 @@ const GhanaTrotroTransit = () => {
         )}
       </div>
     </div>
-  ), [user, startPoint, destination, suggestions, activeInput, isLoading, showWelcomeBanner, userProfile, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet]);
+  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected]);
 
-  // Render route details
+  // Render route details with realtime indicator
   const renderRouteDetails = useCallback(() => (
-    <div className="route-details">
+    <div className="route-details" 
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}>
       <div className="sheet-header">
         <div className="header-content">
           <h2 className="route-name">{selectedRoute?.name || 'Route Details'}</h2>
@@ -752,8 +1252,18 @@ const GhanaTrotroTransit = () => {
           </p>
         </div>
         <div className="header-buttons">
+          <div className="realtime-status">
+            <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
+          </div>
           <button className="new-search-button" onClick={resetSearch} title="New Search">
             <Search size={18} color="#FFFFFF" />
+          </button>
+          <button 
+            className="info-toggle-button"
+            onClick={toggleBottomSheetContent}
+            title="Show Route Information"
+          >
+            <ChevronLeft size={20} color={COLORS.primary} />
           </button>
           <button 
             className="close-button"
@@ -767,6 +1277,7 @@ const GhanaTrotroTransit = () => {
 
       {selectedRoute && (
         <>
+
           <div className="route-summary-cards">
             <div className="summary-card">
               <div className="summary-icon">
@@ -779,8 +1290,8 @@ const GhanaTrotroTransit = () => {
             </div>
             <div className="summary-card">
               <div className="summary-icon">
-                <DollarSign size={20} color={COLORS.primary} />
-              </div>
+                  <span className="cedi-icon" style={{color: COLORS.primary, fontWeight: 600, fontSize: 20,}}>₵</span>
+                </div>
               <div className="summary-content">
                 <span className="summary-label">Total Fare</span>
                 <span className="summary-value">GH₵ {selectedRoute.total_fare}</span>
@@ -807,6 +1318,7 @@ const GhanaTrotroTransit = () => {
                     className={`route-option ${selectedRoute?.id === route.id ? 'route-option-selected' : ''}`}
                     onClick={() => {
                       setSelectedRoute(route);
+                      // Route info will be fetched via useEffect
                     }}
                   >
                     <span className={`route-option-text ${selectedRoute?.id === route.id ? 'route-option-text-selected' : ''}`}>
@@ -856,8 +1368,234 @@ const GhanaTrotroTransit = () => {
           </div>
         </>
       )}
+      
+      {showSwipeIndicator && (
+        <div className="swipe-indicator">
+          <button 
+            className="swipe-indicator-button"
+            onClick={handleIndicatorClick}
+          >
+            <ArrowLeft size={16} />
+            <span>Tap or swipe left for route information</span>
+          </button>
+        </div>
+      )}
     </div>
-  ), [selectedRoute, routes, resetSearch, closeBottomSheet]);
+  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime]);
+
+  // Render route info with realtime indicator
+  const renderRouteInfo = useCallback(() => (
+    <div 
+      className="route-info"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="sheet-header">
+        <div className="header-content">
+          <h2 className="route-name">Route Information</h2>
+          <p className="route-subtitle">
+            {selectedRoute?.name || 'Route Details'}
+          </p>
+        </div>
+        <div className="header-buttons">
+          <div className="realtime-status">
+            <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
+          </div>
+          <button 
+            className="info-toggle-button"
+            onClick={toggleBottomSheetContent}
+            title="Show Route Details"
+          >
+            <ChevronRight size={20} color={COLORS.primary} />
+          </button>
+          <button 
+            className="close-button"
+            onClick={closeBottomSheet}
+            title="Close"
+          >
+            <X size={20} color={COLORS.text} />
+          </button>
+        </div>
+      </div>
+
+      <div className="scroll-view">
+        <div className="route-info-content">
+          {routeInfoData ? (
+            <>
+              {routeInfoData.description && (
+                <div className="info-section">
+                  <h3 className="info-section-title">
+                    <Info size={18} />
+                    Description
+                  </h3>
+                  <p className="info-text">{routeInfoData.description}</p>
+                </div>
+              )}
+
+              <div className="info-grid">
+                {/* Left Column */}
+                <div className="info-column">
+                  {routeInfoData.travel_time_minutes && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <Clock size={18} />
+                        Travel Time
+                      </h3>
+                      <div className="info-item">
+                        <span className="info-value">
+                          {routeInfoData.travel_time_minutes} minutes
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {routeInfoData.frequency && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <CalendarDays size={18} />
+                        Frequency
+                      </h3>
+                      <div className="info-item">
+                        <span className="info-value">{routeInfoData.frequency}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {routeInfoData.peak_hours && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <AlertCircle size={18} />
+                        Peak Hours
+                      </h3>
+                      <div className="info-item">
+                        <span className="info-value">{routeInfoData.peak_hours}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column */}
+                <div className="info-column">
+                  {routeInfoData.vehicle_type && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <Bus size={18} />
+                        Vehicle Type
+                      </h3>
+                      <div className="info-item">
+                        <span className="info-value">{routeInfoData.vehicle_type}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {(routeInfoData.operating_hours?.start || routeInfoData.operating_hours?.end) && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <Clock size={18} />
+                        Operating Hours
+                      </h3>
+                      <div className="info-grid-small">
+                        {(routeInfoData.operating_hours.start || routeInfoData.operating_hours.end) && (
+                          <div className="info-item">
+                            <span className="info-label">Hours:</span>
+                            <span className="info-value">
+                              {routeInfoData.operating_hours.start} - {routeInfoData.operating_hours.end}
+                            </span>
+                          </div>
+                        )}
+                        {routeInfoData.operating_hours.days?.length > 0 && (
+                          <div className="info-item">
+                            <span className="info-label">Days:</span>
+                            <span className="info-value">
+                              {routeInfoData.operating_hours.days.join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {routeInfoData.amenities?.length > 0 && (
+                    <div className="info-section">
+                      <h3 className="info-section-title">
+                        <Wind size={18} />
+                        Amenities
+                      </h3>
+                      <div className="amenities-list">
+                        {routeInfoData.amenities.map((amenity, index) => {
+                          const amenityLabels = {
+                            'air_conditioning': 'Air Conditioning',
+                            'charging_ports': 'Charging Ports',
+                            'tv': 'TV',
+                            'restroom': 'Restroom',
+                            'luggage_space': 'Luggage Space',
+                            'first_aid': 'First Aid Kit'
+                          };
+                          
+                          return (
+                            <span key={index} className="amenity-tag">
+                              {amenityLabels[amenity] || amenity.replace('_', ' ')}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {routeInfoData.notes && (
+                <div className="info-section">
+                  <h3 className="info-section-title">
+                    <Info size={18} />
+                    Additional Notes
+                  </h3>
+                  <p className="info-text">{routeInfoData.notes}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            // Show message when no route info is available
+            <div className="no-route-info">
+              <div className="no-info-icon">
+                <Info size={48} color="#9ca3af" />
+              </div>
+              <h3 className="no-info-title">No Information Available</h3>
+              <p className="no-info-text">
+                Sorry, no additional information is available for this route.
+              </p>
+              <p className="no-info-subtext">
+                Route information may be added by administrators in the future.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Swipe Indicator for route info */}
+      <div className="swipe-indicator">
+        <button 
+          className="swipe-indicator-button"
+          onClick={toggleBottomSheetContent}
+        >
+          <ArrowRight size={16} />
+          <span>Swipe right for route details</span>
+        </button>
+      </div>
+    </div>
+  ), [selectedRoute, routeInfoData, closeBottomSheet, isRealtimeConnected, lastUpdateTime]);
+
+  const renderBottomSheetContent = useCallback(() => {
+    if (bottomSheetContent === 'search') {
+      return renderSearchForm();
+    }
+    
+    // Show either route details or route info based on state
+    return bottomSheetState === 'route-details' 
+      ? renderRouteDetails() 
+      : renderRouteInfo();
+  }, [bottomSheetContent, bottomSheetState, renderSearchForm, renderRouteDetails, renderRouteInfo]);
 
   return (
     <div className="container">
@@ -883,10 +1621,28 @@ const GhanaTrotroTransit = () => {
         <Plus size={20} color="#FFFFFF" />
       </button>
 
+       {user && (
+          <div className="realtime-status-corner-indicator">
+            <Radio size={14} className={isRealtimeConnected ? 'realtime-active' : ''} />
+            <span className="status-text">
+              {isRealtimeConnected ? '' :  'connecting...'}
+            </span>
+          </div>
+        )}
+
+
+      {/* Realtime Status Indicator */}
+      <div className="realtime-status-corner">
+        <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
+        <span className="status-text">
+          {isRealtimeConnected ? 'Online' : 'Offline'}
+        </span>
+      </div>
+
       {/* Info Button with conditional opacity */}
-        <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
-          <Info size={20} color="#FFFFFF" />
-        </button>
+      <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
+        <Info size={20} color="#FFFFFF" />
+      </button>
 
       {/* Bottom Sheet - Slides up from bottom */}
       {showBottomSheet && (
@@ -894,9 +1650,18 @@ const GhanaTrotroTransit = () => {
           className="bottom-sheet-overlay"
           onClick={handleBottomSheetOverlayClick}
         >
-          <div className="bottom-sheet" ref={bottomSheetRef}>
+          <div
+            className="bottom-sheet"
+            ref={bottomSheetRef}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+          >
             <div className="bottom-sheet-content">
-              {bottomSheetContent === 'search' ? renderSearchForm() : renderRouteDetails()}
+              {renderBottomSheetContent()}
             </div>
           </div>
         </div>
@@ -1032,6 +1797,12 @@ const GhanaTrotroTransit = () => {
                     </div>
                     <span className="feature-text">Track your search history</span>
                   </div>
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <Radio size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Real-time route updates</span>
+                  </div>
                 </div>
               </div>
 
@@ -1054,11 +1825,11 @@ const GhanaTrotroTransit = () => {
               </div>
 
               <div className="info-section">
-                <h3 className="info-section-title">Contact & Support</h3>
+                <h3 className="info-section-title">Note</h3>
                 <div className="contact-list">
                   <div className="contact-item">
                     <Info size={20} color={COLORS.primary} />
-                    <span className="contact-text">Please prices may vary, carry extra change on you as you commute. Happy trotro-ing!</span>
+                    <span className="contact-text">Prices may vary from time to time, please make sure to carry on you extra change to avoid complications. Happy Trotro-ing!.</span>
                   </div>
                 </div>
               </div>
@@ -1119,13 +1890,6 @@ const GhanaTrotroTransit = () => {
               )}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="loading-overlay">
-          <div className="loading-spinner"></div>
         </div>
       )}
     </div>
