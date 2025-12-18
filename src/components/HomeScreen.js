@@ -1659,6 +1659,7 @@ const GhanaTrotroTransit = () => {
         <Plus size={20} color="#FFFFFF" />
       </button>
 
+      {/*
        {user && (
           <div className="realtime-status-corner-indicator">
             <Radio size={14} className={isRealtimeConnected ? 'realtime-active' : ''} />
@@ -1667,6 +1668,7 @@ const GhanaTrotroTransit = () => {
             </span>
           </div>
         )}
+        */}
 
 
       {/* Realtime Status Indicator 
