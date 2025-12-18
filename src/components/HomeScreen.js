@@ -192,6 +192,10 @@ const GhanaTrotroTransit = () => {
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
   const [routeInfoData, setRouteInfoData] = useState(null);
+  const [prevBottomSheetState, setPrevBottomSheetState] = useState('route-details');
+  const [swipeTranslate, setSwipeTranslate] = useState(0);
+  const [isSwipeActive, setIsSwipeActive] = useState(false);
+  const bottomSheetContentRef = useRef(null);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -880,39 +884,50 @@ const GhanaTrotroTransit = () => {
   const handleTouchStart = (e) => {
     const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
     setTouchStart(clientX);
+    setIsSwipeActive(true);
+    setSwipeTranslate(0);
   };
 
   const handleTouchMove = (e) => {
+    if (touchStart === null) return;
+    
     const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
-    setTouchEnd(clientX);
+    const distance = clientX - touchStart;
+    
+    // Only allow swipe when showing route content
+    if (bottomSheetContent === 'route') {
+      // Limit the drag to -100% to 100%
+      const clampedDistance = Math.max(-window.innerWidth, Math.min(window.innerWidth, distance));
+      setSwipeTranslate(clampedDistance);
+    }
   };
 
   const handleTouchEnd = () => {
-    if (touchStart === null || touchEnd === null) {
-      setTouchStart(null);
-      setTouchEnd(null);
-      return;
-    }
-
-    const distance = touchStart - touchEnd;
-    const isLeftSwipe = distance > 50; // Minimum distance for swipe
-    const isRightSwipe = distance < -50;
-
+    if (touchStart === null) return;
+    
+    const swipeThreshold = window.innerWidth * 0.2; // 20% of screen width
+    
     // Only respond to swipes when bottom sheet is showing route content
     if (bottomSheetContent === 'route') {
-      if (isLeftSwipe) {
+      if (swipeTranslate < -swipeThreshold && bottomSheetState === 'route-details') {
+        // Swiped left - go to route-info
+        setPrevBottomSheetState('route-details');
         setBottomSheetState('route-info');
-        setShowSwipeIndicator(false);
-      }
-
-      if (isRightSwipe) {
+        setSwipeTranslate(0);
+      } else if (swipeTranslate > swipeThreshold && bottomSheetState === 'route-info') {
+        // Swiped right - go to route-details
+        setPrevBottomSheetState('route-info');
         setBottomSheetState('route-details');
-        setShowSwipeIndicator(false);
+        setSwipeTranslate(0);
+      } else {
+        // Snap back to current position
+        setSwipeTranslate(0);
       }
     }
 
+    setShowSwipeIndicator(false);
+    setIsSwipeActive(false);
     setTouchStart(null);
-    setTouchEnd(null);
   };
 
   // Pointer event fallbacks for desktop / trackpad
@@ -929,6 +944,7 @@ const GhanaTrotroTransit = () => {
   };
 
   const toggleBottomSheetContent = () => {
+    setPrevBottomSheetState(bottomSheetState);
     setBottomSheetState(prev => 
       prev === 'route-details' ? 'route-info' : 'route-details'
     );
@@ -1592,10 +1608,32 @@ const GhanaTrotroTransit = () => {
     }
     
     // Show either route details or route info based on state
-    return bottomSheetState === 'route-details' 
-      ? renderRouteDetails() 
-      : renderRouteInfo();
-  }, [bottomSheetContent, bottomSheetState, renderSearchForm, renderRouteDetails, renderRouteInfo]);
+    // with proper page-like animations and live swipe feedback
+    const contentStyle = isSwipeActive ? {
+      transform: `translateX(${swipeTranslate}px)`,
+      transition: 'none'
+    } : {
+      transform: 'translateX(0)',
+      transition: 'transform 0.3s ease-out'
+    };
+
+    return (
+      <div
+        ref={bottomSheetContentRef}
+        style={contentStyle}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        {bottomSheetState === 'route-details' 
+          ? renderRouteDetails() 
+          : renderRouteInfo()}
+      </div>
+    );
+  }, [bottomSheetContent, bottomSheetState, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
 
   return (
     <div className="container">
@@ -1631,13 +1669,14 @@ const GhanaTrotroTransit = () => {
         )}
 
 
-      {/* Realtime Status Indicator */}
+      {/* Realtime Status Indicator 
       <div className="realtime-status-corner">
         <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
         <span className="status-text">
           {isRealtimeConnected ? 'Online' : 'Offline'}
         </span>
       </div>
+      */}
 
       {/* Info Button with conditional opacity */}
       <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
@@ -1653,12 +1692,6 @@ const GhanaTrotroTransit = () => {
           <div
             className="bottom-sheet"
             ref={bottomSheetRef}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
           >
             <div className="bottom-sheet-content">
               {renderBottomSheetContent()}
