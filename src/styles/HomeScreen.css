@@ -562,23 +562,23 @@ body {
   }
 
   .profile-button{
-    top:50px;
+    top:40px;
     z-index: 100;
   }
 
   .plus-button{
-    top:110px;
+    top:100px;
     z-index: 1;
   }
 
   .floating-button{
-    bottom: 70px;
+    bottom: 80px;
     left: 50%;
     transform: translateX(-50%);
   }
 
   .info-button{
-    bottom: 70px;
+    bottom: 80px;
     right: 20px;
   }
 
