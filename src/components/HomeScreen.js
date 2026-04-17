@@ -306,6 +306,27 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
+  // Clear all search history for the current user
+  const clearSearchHistory = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('search_history')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Error clearing search history:', error);
+        return;
+      }
+
+      setSearchHistory([]);
+    } catch (error) {
+      console.error('Error clearing search history:', error);
+    }
+  }, [user]);
+
   // Fetch stop suggestions
   const fetchSuggestions = useCallback(async (query, type) => {
     if (query.length < 2) {
@@ -1882,6 +1903,14 @@ const GhanaTrotroTransit = () => {
           <div className="modal" ref={modalRef}>
             <div className="modal-header">
               <h2 className="modal-title">Search History</h2>
+              {searchHistory.length > 0 && (
+                <button
+                  className="clear-history-button"
+                  onClick={clearSearchHistory}
+                >
+                  Clear All
+                </button>
+              )}
               <button 
                 className="close-button"
                 onClick={() => setShowSearchHistoryModal(false)}

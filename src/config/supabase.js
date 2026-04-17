@@ -1,7 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://vtmdateqrrrkqbpeedrx.supabase.co';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ0bWRhdGVxcnJya3FicGVlZHJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEyNjAwMTAsImV4cCI6MjA3NjgzNjAxMH0.5ydzJnACZrldXIMf3LAOJVsmb6BFEers1nJTv_QorrU' ;
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl) {
+  throw new Error('Supabase URL is not defined. Please set REACT_APP_SUPABASE_URL in your environment variables.');
+}
+
+if (!supabaseAnonKey) {
+  throw new Error('Supabase Anon Key is not defined. Please set REACT_APP_SUPABASE_ANON_KEY in your environment variables.');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

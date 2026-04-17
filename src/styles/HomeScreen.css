@@ -164,6 +164,24 @@ body {
   justify-content: center;
 }
 
+.clear-history-button {
+  margin-left: 150px;
+  background: none;
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.clear-history-button:hover {
+  background: var(--primary-color);
+  color: #fff;
+}
+
 .new-search-button {
   background-color: var(--primary-color);
   border: none;
@@ -544,13 +562,24 @@ body {
   }
 
   .profile-button{
-    top:70px;
+    top:50px;
     z-index: 100;
   }
 
   .plus-button{
-    top:130px;
+    top:110px;
     z-index: 1;
+  }
+
+  .floating-button{
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .info-button{
+    bottom: 70px;
+    right: 20px;
   }
 
   /* Bottom Sheet Styles */
