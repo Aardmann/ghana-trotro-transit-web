@@ -582,6 +582,12 @@ body {
     right: 20px;
   }
 
+  .clear-history-button{
+    margin-left: 0;
+    align-self: center;
+    margin-left: 30px;
+  }
+
   /* Bottom Sheet Styles */
 .bottom-sheet-overlay {
   position: absolute;
