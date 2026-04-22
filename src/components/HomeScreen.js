@@ -1260,6 +1260,31 @@ const GhanaTrotroTransit = () => {
           </button>
         </div>
 
+        {/**
+        {user && searchHistory.length > 0 && (
+          <div className="recent-searches">
+            <h3 className="recent-searches-title">Recent Searches</h3>
+            <div className="recent-searches-list">
+              {searchHistory.slice(0, 5).map((search) => (
+                <button
+                  key={search.id}
+                  className="recent-search-item"
+                  onClick={() => {
+                    setStartPoint(search.start_point);
+                    setDestination(search.destination);
+                    setSuggestions([]);
+                  }}
+                >
+                  <MapPin size={16} color={COLORS.primary} />
+                  <span className="recent-search-text">{search.start_point} → {search.destination}</span>
+                  <span className="recent-search-date">{new Date(search.searched_at).toLocaleDateString()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        */}
+        
         {!user && (
           <div className="quick-auth-section">
             <span className="quick-auth-text">Don't have an account?</span>
@@ -1273,7 +1298,7 @@ const GhanaTrotroTransit = () => {
         )}
       </div>
     </div>
-  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected]);
+  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory]);
 
   // Render route details with realtime indicator
   const renderRouteDetails = useCallback(() => (
@@ -1664,6 +1689,11 @@ const GhanaTrotroTransit = () => {
         routeCoordinates={memoizedRouteCoordinates}
         stops={memoizedStops}
       />
+
+      {/* App Title in Top Left */}
+      <div className="app-title-top-left">
+        <h4>Ghana Trotro Transit</h4>
+      </div>
 
       {/* Top Right Buttons */}
       <button
