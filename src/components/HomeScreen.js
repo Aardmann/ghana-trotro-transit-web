@@ -3,7 +3,8 @@ import {
   ArrowUpDown, Copy, Info, Lock, MapPin, Navigation, 
   Search, Share2, User, X, Plus, History, Key, 
   Mail, Phone, Globe, Clock, Map,
-  ChevronLeft, ChevronRight, ArrowLeft, ArrowRight, 
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
+  ArrowLeft, ArrowRight, Trash2,
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio
@@ -172,6 +173,27 @@ const GhanaTrotroTransit = () => {
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
   const [searchHistory, setSearchHistory] = useState([]);
 
+  // Download app modal state
+  const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
+
+  // Recent searches panel – persisted to localStorage
+  const [showRecentSearches, setShowRecentSearches] = useState(() => {
+    try {
+      const saved = localStorage.getItem('gtt_showRecentSearches');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleRecentSearches = useCallback(() => {
+    setShowRecentSearches(prev => {
+      const next = !prev;
+      try { localStorage.setItem('gtt_showRecentSearches', String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
   // Realtime states
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
@@ -324,6 +346,28 @@ const GhanaTrotroTransit = () => {
       setSearchHistory([]);
     } catch (error) {
       console.error('Error clearing search history:', error);
+    }
+  }, [user]);
+
+  // Delete a single search history item
+  const deleteSearchHistoryItem = useCallback(async (itemId) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('search_history')
+        .delete()
+        .eq('id', itemId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Error deleting search history item:', error);
+        return;
+      }
+
+      setSearchHistory(prev => prev.filter(item => item.id !== itemId));
+    } catch (error) {
+      console.error('Error deleting search history item:', error);
     }
   }, [user]);
 
@@ -1143,7 +1187,7 @@ const GhanaTrotroTransit = () => {
       
         <div className="search-card">
           <div className="input-row">
-            <div className="input-container">
+            <div className="input-container input-container-start">
               <div className="input-icon">
                 <MapPin size={20} color={COLORS.primary} />
               </div>
@@ -1260,30 +1304,55 @@ const GhanaTrotroTransit = () => {
           </button>
         </div>
 
-        {/**
         {user && searchHistory.length > 0 && (
           <div className="recent-searches">
-            <h3 className="recent-searches-title">Recent Searches</h3>
-            <div className="recent-searches-list">
-              {searchHistory.slice(0, 5).map((search) => (
-                <button
-                  key={search.id}
-                  className="recent-search-item"
-                  onClick={() => {
-                    setStartPoint(search.start_point);
-                    setDestination(search.destination);
-                    setSuggestions([]);
-                  }}
-                >
-                  <MapPin size={16} color={COLORS.primary} />
-                  <span className="recent-search-text">{search.start_point} → {search.destination}</span>
-                  <span className="recent-search-date">{new Date(search.searched_at).toLocaleDateString()}</span>
-                </button>
-              ))}
-            </div>
+            <button
+              className="recent-searches-header"
+              onClick={toggleRecentSearches}
+            >
+              <div className="recent-searches-header-left">
+                <History size={16} color={COLORS.primary} />
+                <span className="recent-searches-title">Recent Searches</span>
+                <span className="recent-searches-count">{Math.min(searchHistory.length, 5)}</span>
+              </div>
+              {showRecentSearches
+                ? <ChevronUp size={18} color={COLORS.textLight} />
+                : <ChevronDown size={18} color={COLORS.textLight} />
+              }
+            </button>
+
+            {showRecentSearches && (
+              <div className="recent-searches-list">
+                {searchHistory.slice(0, 5).map((search) => (
+                  <button
+                    key={search.id}
+                    className="recent-search-item"
+                    onClick={() => {
+                      setStartPoint(search.start_point);
+                      setDestination(search.destination);
+                      setSuggestions([]);
+                    }}
+                  >
+                    <div className="recent-search-icon">
+                      <MapPin size={14} color={COLORS.primary} />
+                    </div>
+                    <div className="recent-search-body">
+                      <span className="recent-search-text">
+                        {search.start_point}
+                        <span className="recent-search-arrow"> → </span>
+                        {search.destination}
+                      </span>
+                      <span className="recent-search-date">
+                        {new Date(search.searched_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <ChevronRight size={16} color={COLORS.textLight} className="recent-search-chevron" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
-        */}
         
         {!user && (
           <div className="quick-auth-section">
@@ -1298,7 +1367,7 @@ const GhanaTrotroTransit = () => {
         )}
       </div>
     </div>
-  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory]);
+  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory, showRecentSearches, toggleRecentSearches]);
 
   // Render route details with realtime indicator
   const renderRouteDetails = useCallback(() => (
@@ -1310,7 +1379,7 @@ const GhanaTrotroTransit = () => {
         <div className="header-content">
           <h2 className="route-name">{selectedRoute?.name || 'Route Details'}</h2>
           <p className="route-subtitle">
-            {selectedRoute?.stops[0]?.name} → {selectedRoute?.stops[selectedRoute.stops.length - 1]?.name}
+            Ghana Trotro Transit Route
           </p>
         </div>
         <div className="header-buttons">
@@ -1338,8 +1407,7 @@ const GhanaTrotroTransit = () => {
       </div>
 
       {selectedRoute && (
-        <>
-
+        <div className="route-details-body">
           <div className="route-summary-cards">
             <div className="summary-card">
               <div className="summary-icon">
@@ -1396,39 +1464,56 @@ const GhanaTrotroTransit = () => {
           )}
 
           <div className="stops-list">
-            <h3 className="stops-title">Route Stops</h3>
+            <h3 className="stops-title">
+              <span className="stops-title-text">Route Stops</span>
+              <span className="stops-count-badge">{selectedRoute.stops.length} stops</span>
+            </h3>
             <div className="stops-timeline">
-              {selectedRoute.stops.map((stop, index) => (
-                <div key={index} className="stop-item">
-                  <div className="stop-marker">
-                    <div className={`stop-dot ${index === 0 ? 'start-dot' : index === selectedRoute.stops.length - 1 ? 'end-dot' : ''}`}>
-                      {index === 0 ? <MapPin size={12} color="#FFFFFF" /> : 
-                       index === selectedRoute.stops.length - 1 ? <Navigation size={12} color="#FFFFFF" /> :
-                       <span className="stop-number">{index + 1}</span>}
+              {selectedRoute.stops.map((stop, index) => {
+                const isFirst = index === 0;
+                const isLast  = index === selectedRoute.stops.length - 1;
+                const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
+                return (
+                  <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
+                    {/* Left: connector column */}
+                    <div className="stop-connector">
+                      <div className={`stop-node ${stopClass}`}>
+                        {isFirst  ? <MapPin    size={13} color="#fff" /> :
+                         isLast   ? <Navigation size={13} color="#fff" /> :
+                         <span className="stop-node-num">{index}</span>}
+                      </div>
+                      {!isLast && <div className="stop-connector-line" />}
                     </div>
-                    {index < selectedRoute.stops.length - 1 && <div className="stop-line" />}
-                  </div>
-                  <div className="stop-info">
-                    <div className="stop-header">
-                      <span className="stop-name">{stop.name}</span>
-                      {stop.fare_to_next && (
-                        <span className="stop-fare">GH₵ {stop.fare_to_next}</span>
+
+                    {/* Right: card */}
+                    <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
+                      <div className="stop-card-top">
+                        <div className="stop-card-label">
+                          <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
+                            {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
+                          </span>
+                        </div>
+                        {stop.fare_to_next && (
+                          <span className="stop-fare-pill">
+                            <span className="stop-fare-cedi">₵</span>
+                            {stop.fare_to_next}
+                          </span>
+                        )}
+                      </div>
+                      <span className="stop-card-name">{stop.name}</span>
+                      {stop.distance_to_next && (
+                        <div className="stop-card-meta">
+                          <span className="stop-meta-dot" />
+                          <span className="stop-card-distance">{stop.distance_to_next} km to next stop</span>
+                        </div>
                       )}
                     </div>
-                    {stop.distance_to_next && (
-                      <span className="stop-distance">{stop.distance_to_next} km to next</span>
-                    )}
-                    <div className="stop-type">
-                      {index === 0 ? 'Start Point' : 
-                       index === selectedRoute.stops.length - 1 ? 'Destination' : 
-                       `Stop ${index}`}
-                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
-        </>
+        </div>
       )}
       
       {showSwipeIndicator && (
@@ -1666,6 +1751,7 @@ const GhanaTrotroTransit = () => {
     return (
       <div
         ref={bottomSheetContentRef}
+        className="route-swipe-wrapper"
         style={contentStyle}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -1705,7 +1791,7 @@ const GhanaTrotroTransit = () => {
 
       <button
         className="plus-button"
-        onClick={() => alert('Create route feature coming soon!')}
+        onClick={() => setShowDownloadAppModal(true)}
       >
         <Plus size={20} color="#FFFFFF" />
       </button>
@@ -1905,7 +1991,9 @@ const GhanaTrotroTransit = () => {
                   </div>
                   <div className="contact-item">
                     <Globe size={16} color={COLORS.primary} />
-                    <span className="contact-text">www.ghanatrotrotransit.com/help</span>
+                    <span className="contact-text">
+                      <a className="contact-text-help" href='https://ghana-trotro-transit.netlify.app' target='_blank' rel="noreferrer">https://ghana-trotro-transit.netlify.app</a>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1915,9 +2003,60 @@ const GhanaTrotroTransit = () => {
                 <div className="contact-list">
                   <div className="contact-item">
                     <Info size={20} color={COLORS.primary} />
-                    <span className="contact-text">Prices may vary from time to time, please make sure to carry on you extra change to avoid complications. Happy Trotro-ing!.</span>
+                    <span className="contact-text">Prices may vary from time to time, please make sure to carry on you extra change to avoid complications. Happy Trotro-ing!</span>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Download App Modal */}
+      {showDownloadAppModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDownloadAppModal(false); }}
+        >
+          <div className="modal download-app-modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Download the App</h2>
+              <button className="close-button" onClick={() => setShowDownloadAppModal(false)}>
+                <X size={24} color={COLORS.text} />
+              </button>
+            </div>
+            <div className="modal-content download-app-content">
+              <div className="download-app-icon">
+                <Plus size={40} color={COLORS.background} />
+              </div>
+              <h3 className="download-app-heading">Create Route</h3>
+              <p className="download-app-text">
+                The <strong>Create Route</strong> feature is available exclusively on our mobile app.
+                Download Ghana Trotro Transit to create and share custom trotro routes on the go.
+              </p>
+              <div className="download-app-buttons">
+                <a
+                  href="https://ghana-trotro-transit.netlify.app/#download"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="store-button store-button-ios"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+                  </svg>
+                  <span>App Store</span>
+                </a>
+                <a
+                  href="https://ghana-trotro-transit.netlify.app/#download"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="store-button store-button-android"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3.18 23.76c.35.2.74.24 1.12.12l11.4-6.59-2.38-2.38-10.14 8.85zm-1.8-20.2C1.15 3.9 1 4.27 1 4.7v14.6c0 .43.15.8.38 1.1l.07.06 8.19-8.2v-.18L1.45 3.5l-.07.06zM20.1 10.5l-2.34-1.36-2.66 2.66 2.66 2.65 2.36-1.37c.67-.39.67-1.2-.02-1.58zM4.3.12L15.7 6.71l-2.38 2.38L3.18.24C3.54.06 3.95.08 4.3.12z"/>
+                  </svg>
+                  <span>Google Play</span>
+                </a>
               </div>
             </div>
           </div>
@@ -1935,9 +2074,10 @@ const GhanaTrotroTransit = () => {
               <h2 className="modal-title">Search History</h2>
               {searchHistory.length > 0 && (
                 <button
-                  className="clear-history-button"
+                  className="clear-history-button clear-history-button--red"
                   onClick={clearSearchHistory}
                 >
+                  <Trash2 size={14} />
                   Clear All
                 </button>
               )}
@@ -1961,24 +2101,38 @@ const GhanaTrotroTransit = () => {
               ) : (
                 <div className="history-list">
                   {searchHistory.map((search) => (
-                    <button
+                    <div
                       key={search.id}
                       className="history-item"
-                      onClick={() => {
-                        setStartPoint(search.start_point);
-                        setDestination(search.destination);
-                        setShowSearchHistoryModal(false);
-                        setBottomSheetContent('search');
-                        setShowBottomSheet(true);
-                      }}
                     >
-                      <span className="history-route-name">
-                        {search.start_point} → {search.destination}
-                      </span>
-                      <span className="history-date">
-                        {new Date(search.searched_at).toLocaleDateString()}
-                      </span>
-                    </button>
+                      <button
+                        className="history-item-content"
+                        onClick={() => {
+                          setStartPoint(search.start_point);
+                          setDestination(search.destination);
+                          setShowSearchHistoryModal(false);
+                          setBottomSheetContent('search');
+                          setShowBottomSheet(true);
+                        }}
+                      >
+                        <span className="history-route-name">
+                          {search.start_point} → {search.destination}
+                        </span>
+                        <span className="history-date">
+                          {new Date(search.searched_at).toLocaleDateString()}
+                        </span>
+                      </button>
+                      <button
+                        className="history-delete-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSearchHistoryItem(search.id);
+                        }}
+                        title="Delete this entry"
+                      >
+                        <X size={16} color={COLORS.textLight} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
