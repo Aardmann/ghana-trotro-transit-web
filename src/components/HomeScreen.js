@@ -176,6 +176,9 @@ const GhanaTrotroTransit = () => {
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
 
+  // Map layer mode: 'satellite' | 'street'
+  const [mapMode, setMapMode] = useState('satellite');
+
   // Recent searches panel – persisted to localStorage
   const [showRecentSearches, setShowRecentSearches] = useState(() => {
     try {
@@ -218,6 +221,13 @@ const GhanaTrotroTransit = () => {
   const [swipeTranslate, setSwipeTranslate] = useState(0);
   const [isSwipeActive, setIsSwipeActive] = useState(false);
   const bottomSheetContentRef = useRef(null);
+
+  // ── Vertical drag / snap state ──────────────────────────────────────────────
+  const SNAP_HEIGHTS = [32, 58, 88]; // vh: peek, half, full
+  const [sheetSnapIndex, setSheetSnapIndex] = useState(1);
+  const [sheetDragHeight, setSheetDragHeight] = useState(SNAP_HEIGHTS[1]);
+  const [sheetIsDragging, setSheetIsDragging] = useState(false);
+  const sheetDragRef = useRef({ active: false, startY: 0, startH: SNAP_HEIGHTS[1], currentH: SNAP_HEIGHTS[1] });
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -1021,6 +1031,71 @@ const GhanaTrotroTransit = () => {
     setShowSwipeIndicator(false);
   };
 
+  // ── Sheet vertical drag handlers ─────────────────────────────────────────
+  const handleSheetHandlePointerDown = useCallback((e) => {
+    e.stopPropagation();
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    sheetDragRef.current = {
+      active: true,
+      startY: clientY,
+      startH: SNAP_HEIGHTS[sheetSnapIndex],
+      currentH: SNAP_HEIGHTS[sheetSnapIndex],
+    };
+    setSheetIsDragging(true);
+  }, [sheetSnapIndex]);
+
+  useEffect(() => {
+    if (!sheetIsDragging) return;
+
+    const onMove = (e) => {
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const d = sheetDragRef.current;
+      const deltaVh = ((d.startY - clientY) / window.innerHeight) * 100;
+      const newH = Math.min(92, Math.max(20, d.startH + deltaVh));
+      d.currentH = newH;
+      setSheetDragHeight(newH);
+    };
+
+    const onUp = () => {
+      const h = sheetDragRef.current.currentH;
+      let nearest = 0;
+      let minDist = Infinity;
+      SNAP_HEIGHTS.forEach((sh, i) => {
+        const dist = Math.abs(sh - h);
+        if (dist < minDist) { minDist = dist; nearest = i; }
+      });
+      setSheetSnapIndex(nearest);
+      setSheetDragHeight(SNAP_HEIGHTS[nearest]);
+      setSheetIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchend', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchend', onUp);
+    };
+  }, [sheetIsDragging]);
+
+  // Reset sheet to mid snap when bottom sheet opens
+  useEffect(() => {
+    if (showBottomSheet) {
+      setSheetSnapIndex(1);
+      setSheetDragHeight(SNAP_HEIGHTS[1]);
+    }
+  }, [showBottomSheet]);
+
+  // Auto-hide swipe indicator after 5 seconds
+  useEffect(() => {
+    if (!showSwipeIndicator) return;
+    const timer = setTimeout(() => setShowSwipeIndicator(false), 5000);
+    return () => clearTimeout(timer);
+  }, [showSwipeIndicator]);
+
   // Check if any modal or bottom sheet is open
   const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal;
 
@@ -1774,6 +1849,7 @@ const GhanaTrotroTransit = () => {
         center={memoizedMapCenter}
         routeCoordinates={memoizedRouteCoordinates}
         stops={memoizedStops}
+        mapMode={mapMode}
       />
 
       {/* App Title in Top Left */}
@@ -1822,16 +1898,51 @@ const GhanaTrotroTransit = () => {
         <Info size={20} color="#FFFFFF" />
       </button>
 
-      {/* Bottom Sheet - Slides up from bottom */}
+      {/* Map Mode Toggle Button — bottom left */}
+      <button
+        className="map-mode-button"
+        onClick={() => setMapMode(prev => prev === 'satellite' ? 'street' : 'satellite')}
+        title={mapMode === 'satellite' ? 'Switch to Street map' : 'Switch to Satellite'}
+      >
+        <img
+          src={
+            mapMode === 'satellite'
+              /* Show street-map thumbnail when currently in satellite mode */
+              ? 'https://tile.openstreetmap.org/13/4090/3969.png'
+              /* Show satellite thumbnail when currently in street mode */
+              : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/3969/4090'
+          }
+          alt={mapMode === 'satellite' ? 'Switch to Street' : 'Switch to Satellite'}
+          className="map-mode-thumb"
+        />
+        <span className="map-mode-label">
+          {mapMode === 'satellite' ? 'Map' : 'Satellite'}
+        </span>
+      </button>
+
+      {/* Bottom Sheet - Slides up from bottom, draggable */}
       {showBottomSheet && (
         <div 
           className="bottom-sheet-overlay"
           onClick={handleBottomSheetOverlayClick}
         >
           <div
-            className="bottom-sheet"
+            className={`bottom-sheet${sheetIsDragging ? ' is-dragging' : ''}`}
             ref={bottomSheetRef}
+            style={{
+              height: `${sheetDragHeight}vh`,
+              transition: sheetIsDragging ? 'none' : 'height 0.38s cubic-bezier(0.4,0,0.2,1)',
+            }}
           >
+            {/* ── Drag Handle ── */}
+            <div
+              className="sheet-drag-handle"
+              onMouseDown={handleSheetHandlePointerDown}
+              onTouchStart={handleSheetHandlePointerDown}
+            >
+              <div className="drag-pill" />
+            </div>
+
             <div className="bottom-sheet-content">
               {renderBottomSheetContent()}
             </div>

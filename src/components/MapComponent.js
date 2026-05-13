@@ -1,11 +1,25 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import './MapComponent.css';
 
+const TILE_LAYERS = {
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    maxZoom: 18,
+  },
+  street: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 18,
+  },
+};
+
 // Use React.memo to prevent unnecessary re-renders
-const MapComponent = React.memo(({ center, routeCoordinates, stops }) => {
+const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 'satellite' }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const routingControlRef = useRef(null);
+  const tileLayerRef = useRef(null);
   const isInitializedRef = useRef(false);
 
   // Memoized initialization function
@@ -79,13 +93,14 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops }) => {
 
       // Initialize map only if not already initialized
       if (!mapInstanceRef.current) {
-        const map = window.L.map(mapRef.current).setView(center, 13);
+        const map = window.L.map(mapRef.current).setView(center, 15);
         mapInstanceRef.current = map;
 
-        // Add OpenStreetMap tiles
-        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-          maxZoom: 18
+        // Add initial tile layer based on mapMode
+        const layerConfig = TILE_LAYERS[mapMode] || TILE_LAYERS.satellite;
+        tileLayerRef.current = window.L.tileLayer(layerConfig.url, {
+          attribution: layerConfig.attribution,
+          maxZoom: layerConfig.maxZoom,
         }).addTo(map);
       }
 
@@ -96,6 +111,25 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops }) => {
       console.error('Error initializing map:', error);
     }
   }, [center]);
+
+  // Switch tile layers when mapMode changes
+  const updateTileLayer = useCallback(() => {
+    if (!mapInstanceRef.current || !window.L) return;
+
+    const layerConfig = TILE_LAYERS[mapMode] || TILE_LAYERS.satellite;
+
+    if (tileLayerRef.current) {
+      mapInstanceRef.current.removeLayer(tileLayerRef.current);
+    }
+
+    tileLayerRef.current = window.L.tileLayer(layerConfig.url, {
+      attribution: layerConfig.attribution,
+      maxZoom: layerConfig.maxZoom,
+    }).addTo(mapInstanceRef.current);
+
+    // Ensure tile layer stays below route/markers
+    tileLayerRef.current.bringToBack();
+  }, [mapMode]);
 
   const updateMapRouting = useCallback(() => {
     if (!mapInstanceRef.current || !window.L) return;
@@ -190,6 +224,13 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops }) => {
     initializeMap();
   }, [initializeMap]);
 
+  // React to mapMode changes after map is initialized
+  useEffect(() => {
+    if (isInitializedRef.current && mapInstanceRef.current) {
+      updateTileLayer();
+    }
+  }, [updateTileLayer]);
+
   useEffect(() => {
     if (isInitializedRef.current) {
       updateMapRouting();
@@ -204,6 +245,7 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops }) => {
         mapInstanceRef.current = null;
       }
       routingControlRef.current = null;
+      tileLayerRef.current = null;
       isInitializedRef.current = false;
     };
   }, []);
