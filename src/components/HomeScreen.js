@@ -1545,47 +1545,64 @@ const GhanaTrotroTransit = () => {
             </h3>
             <div className="stops-timeline">
               {selectedRoute.stops.map((stop, index) => {
-                const isFirst = index === 0;
-                const isLast  = index === selectedRoute.stops.length - 1;
-                const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
-                return (
-                  <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
-                    {/* Left: connector column */}
-                    <div className="stop-connector">
-                      <div className={`stop-node ${stopClass}`}>
-                        {isFirst  ? <MapPin    size={13} color="#fff" /> :
-                         isLast   ? <Navigation size={13} color="#fff" /> :
-                         <span className="stop-node-num">{index}</span>}
-                      </div>
-                      {!isLast && <div className="stop-connector-line" />}
-                    </div>
-
-                    {/* Right: card */}
-                    <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
-                      <div className="stop-card-top">
-                        <div className="stop-card-label">
-                          <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
-                            {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
-                          </span>
-                        </div>
-                        {stop.fare_to_next && (
-                          <span className="stop-fare-pill">
-                            <span className="stop-fare-cedi">₵</span>
-                            {stop.fare_to_next}
-                          </span>
-                        )}
-                      </div>
-                      <span className="stop-card-name">{stop.name}</span>
-                      {stop.distance_to_next && (
-                        <div className="stop-card-meta">
-                          <span className="stop-meta-dot" />
-                          <span className="stop-card-distance">{stop.distance_to_next} km to next stop</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+  const isFirst  = index === 0;
+  const isLast   = index === selectedRoute.stops.length - 1;
+  const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
+ 
+  // A stop with fare_to_next === 0 means the leg TO the next stop is a walk
+  const isWalkToNext = !isLast && Number(stop.fare_to_next) === 0;
+ 
+  return (
+    <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
+      {/* Left: connector column */}
+      <div className="stop-connector">
+        <div className={`stop-node ${stopClass}`}>
+          {isFirst  ? <MapPin    size={13} color="#fff" /> :
+           isLast   ? <Navigation size={13} color="#fff" /> :
+           <span className="stop-node-num">{index}</span>}
+        </div>
+        {/* Dashed green line for walk legs, normal line otherwise */}
+        {!isLast && (
+          <div className={`stop-connector-line${isWalkToNext ? ' stop-connector-line--walk' : ''}`} />
+        )}
+      </div>
+ 
+      {/* Right: card */}
+      <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
+        <div className="stop-card-top">
+          <div className="stop-card-label">
+            <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
+              {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
+            </span>
+          </div>
+ 
+          {/* Show walk badge OR fare pill */}
+          {isWalkToNext ? (
+            <span className="stop-walk-pill">
+              Walk
+            </span>
+          ) : (
+            stop.fare_to_next ? (
+              <span className="stop-fare-pill">
+                <span className="stop-fare-cedi">₵</span>
+                {stop.fare_to_next}
+              </span>
+            ) : null
+          )}
+        </div>
+ 
+        <span className="stop-card-name">{stop.name}</span>
+ 
+        {stop.distance_to_next && (
+          <div className="stop-card-meta">
+            <span className="stop-meta-dot" />
+            <span className="stop-card-distance">{stop.distance_to_next} km to next stop</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+})}
             </div>
           </div>
         </div>

@@ -3679,3 +3679,34 @@ body, #root {
   text-decoration: none;
   color: var(--text-color)
 }
+
+.stop-connector-line--walk {
+  background: transparent;
+}
+ 
+.stop-connector-line--walk::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    #10b981 0px,
+    #10b981 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  opacity: 0.85;
+}
+ 
+/* ── Walk pill (replaces fare pill for zero-fare legs) ───────────────────── */
+.stop-walk-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #059669;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
