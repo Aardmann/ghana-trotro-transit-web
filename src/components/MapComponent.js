@@ -34,7 +34,7 @@ const buildArcPath = (map, from, to, arcHeightFactor = 0.35) => {
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 'satellite' }) => {
+const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 'satellite', isComposite = false }) => {
   const mapRef            = useRef(null);
   const mapInstanceRef    = useRef(null);
   const routingControlRef = useRef(null);
@@ -164,14 +164,18 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 's
 
     if (!routeCoordinates || routeCoordinates.length < 2) return;
 
-    // Classify segments 
+    // Classify segments.
+    // For composite routes: leg-end stops are transfer points, NOT walk segments.
+    // They stay inside the driving segment so road routing draws through them.
     const drivingSegments = [];
     const walkSegments    = [];
     let   currentRun      = [0];
 
     for (let i = 0; i < routeCoordinates.length - 1; i++) {
       const stop   = stops && stops[i];
-      const isWalk = stop && Number(stop.fare_to_next) === 0;
+      // Only arc when fare_to_next is explicitly 0.
+      // Number(null) === 0 is true in JS, so we must check the raw value.
+      const isWalk = stop && stop.fare_to_next === 0;
       if (isWalk) {
         if (currentRun.length > 1) drivingSegments.push([...currentRun]);
         walkSegments.push({
@@ -212,21 +216,30 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 's
             const stopName   = stop ? stop.name : `Stop ${coordIndex + 1}`;
             const isFirst    = coordIndex === 0;
             const isLast     = coordIndex === routeCoordinates.length - 1;
+            // Transfer marker: encoded directly in the stop object by fetchCompositeSegments
+            const isTransfer = stop?.isTransfer === true;
 
             let className = 'custom-marker';
-            if (isFirst) className += ' start-marker';
-            if (isLast)  className += ' end-marker';
+            if (isFirst)    className += ' start-marker';
+            if (isLast)     className += ' end-marker';
+            if (isTransfer) className += ' transfer-marker';
 
             const marker = L.marker(waypoint.latLng, {
               icon: L.divIcon({
                 className,
-                html: `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:10px;">${coordIndex + 1}</div>`,
+                html: isTransfer
+                  ? `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:9px;">⇄</div>`
+                  : `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:10px;">${coordIndex + 1}</div>`,
                 iconSize: [20, 20], iconAnchor: [10, 10],
               }),
             });
             if (stop) {
               let popup = `<b>${stopName}</b>`;
-              if (stop.fare_to_next) popup += `<br>Fare to next: GH₵ ${stop.fare_to_next}`;
+              if (isTransfer) {
+                popup += `<br><em style="color:#a855f7;font-weight:600;">Transfer point</em>`;
+              } else if (stop.fare_to_next) {
+                popup += `<br>Fare to next: GH₵ ${stop.fare_to_next}`;
+              }
               if (stop.distance_to_next) popup += `<br>Distance: ${stop.distance_to_next} km`;
               marker.bindPopup(popup);
             }
@@ -322,7 +335,7 @@ const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 's
         { padding: [20, 20] }
       );
     }
-  }, [routeCoordinates, stops, clearWalkArcs, drawWalkArcs]);
+  }, [routeCoordinates, stops, isComposite, clearWalkArcs, drawWalkArcs]);
 
   // ── Tile layer switch ──────────────────────────────────────────────────────
   const updateTileLayer = useCallback(() => {

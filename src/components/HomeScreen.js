@@ -147,6 +147,150 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
   );
 };
 
+// ── Composite route helper ─────────────────────────────────────────────────────
+// For a composite route, each sub-route in route_compositions becomes ONE row
+// in the UI stops list, labelled with the sub-route name and its own total_fare.
+// The map receives all real stop coordinates from all sub-routes so road routing
+// draws continuously through every junction point without showing walk arcs.
+//
+// Schema facts used here:
+//   route_compositions.composite_route_id  → FK to the parent/composite route
+//   route_compositions.sub_route_id        → FK to each constituent sub-route
+//   route_compositions.composition_order   → display order
+//   No fare_override column — fare always comes from sub_route.total_fare
+const fetchCompositeSegments = async (routeId) => {
+  const { data: compositions, error } = await supabase
+    .from('route_compositions')
+    .select(`
+      composition_order,
+      sub_route:sub_route_id (
+        id,
+        name,
+        total_fare,
+        total_distance,
+        route_stops (
+          stop_order,
+          fare_to_next,
+          distance_to_next,
+          stops (*)
+        )
+      )
+    `)
+    .eq('composite_route_id', routeId)
+    .order('composition_order');
+
+  if (error || !compositions || compositions.length === 0) return null;
+
+  // Each composition entry → one segment shown in the stops list
+  const segments = compositions.map((comp) => {
+    const subRoute = comp.sub_route;
+    if (!subRoute || !subRoute.route_stops) return null;
+
+    const sorted = [...subRoute.route_stops].sort((a, b) => a.stop_order - b.stop_order);
+    const firstStop = sorted[0]?.stops;
+    const lastStop  = sorted[sorted.length - 1]?.stops;
+
+    return {
+      subRouteId:   subRoute.id,
+      subRouteName: subRoute.name,
+      fare:         subRoute.total_fare,       // fare from the sub-route itself
+      distance:     subRoute.total_distance,
+      fromName:     firstStop?.name ?? '',
+      toName:       lastStop?.name  ?? '',
+      // All coordinates for this sub-route (used to build the map path)
+      allCoords: sorted.map(rs => ({
+        name: rs.stops.name,
+        lat:  parseFloat(rs.stops.latitude),
+        lng:  parseFloat(rs.stops.longitude),
+      })),
+    };
+  }).filter(Boolean);
+
+  if (segments.length === 0) return null;
+
+  // Flatten all sub-route coords into one list for the map, deduplicating the
+  // shared boundary stop between consecutive legs (last of leg N = first of leg N+1).
+  //
+  // fare_to_next on stop[i] controls the segment from stop[i] → stop[i+1]:
+  //   • 0   → draw a walk arc (dashed) instead of road-routing
+  //   • null → road-route as normal
+  //
+  // The segment's character is determined by the sub-route that OWNS stop[i+1]:
+  //   - Both stops inside the same sub-route       → own sub-route's fare
+  //   - stop[i] is the last of sub-route k,
+  //     stop[i+1] is the first of sub-route k+1    → k+1's fare (the destination)
+  //
+  // This ensures arcs start exactly where the walk sub-route begins and stop
+  // exactly where it ends, with no bleed into adjacent road-routed segments.
+  const mapStops = [];
+  segments.forEach((seg, i) => {
+    const isWalkSeg  = Number(seg.fare) === 0;
+    const prevIsWalk = i > 0 && Number(segments[i - 1].fare) === 0;
+    const nextSeg    = segments[i + 1] ?? null;
+    const coords     = i === 0 ? seg.allCoords : seg.allCoords.slice(1);
+
+    coords.forEach((c, j) => {
+      const isJunction    = i > 0 && j === 0;
+      const isLastInSeg   = j === coords.length - 1;
+
+      // For the last stop in this sub-route the next stop belongs to nextSeg.
+      // Use nextSeg's fare to decide whether that crossing segment is a walk.
+      const fare_to_next = isLastInSeg
+        ? (nextSeg && Number(nextSeg.fare) === 0 ? 0 : null)
+        : (isWalkSeg ? 0 : null);
+
+      mapStops.push({
+        name:        c.name,
+        lat:         c.lat,
+        lng:         c.lng,
+        fare_to_next,
+        // Transfer marker only at boundaries between two non-walk sub-routes
+        isTransfer:  isJunction && !isWalkSeg && !prevIsWalk,
+      });
+    });
+  });
+
+  return { segments, mapStops };
+};
+
+// Format a single route row from Supabase into the app's route shape.
+const formatRoute = async (route) => {
+  if (route.is_composite) {
+    const composite = await fetchCompositeSegments(route.id);
+    if (composite) {
+      return {
+        id:             route.id,
+        name:           route.name,
+        total_distance: route.total_distance,
+        total_fare:     route.total_fare,
+        is_composite:   true,
+        // segments drives the stops-list UI for composite routes
+        compositionSegments: composite.segments,
+        // mapStops / stops are used by the map (all real coordinates)
+        stops: composite.mapStops,
+      };
+    }
+  }
+
+  // Normal (non-composite) route
+  const sortedStops = [...route.route_stops].sort((a, b) => a.stop_order - b.stop_order);
+  return {
+    id:             route.id,
+    name:           route.name,
+    total_distance: route.total_distance,
+    total_fare:     route.total_fare,
+    is_composite:   false,
+    compositionSegments: [],
+    stops: sortedStops.map(rs => ({
+      name:             rs.stops.name,
+      lat:              parseFloat(rs.stops.latitude),
+      lng:              parseFloat(rs.stops.longitude),
+      fare_to_next:     rs.fare_to_next,
+      distance_to_next: rs.distance_to_next,
+    })),
+  };
+};
+
 const GhanaTrotroTransit = () => {
   // Navigation and UI states
   const [startPoint, setStartPoint] = useState('');
@@ -756,24 +900,8 @@ const GhanaTrotroTransit = () => {
           return startMatches && destMatches;
         });
 
-        // Format routes
-        const formattedRoutes = matchingRoutes.map(route => {
-          const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
-          
-          return {
-            id: route.id,
-            name: route.name,
-            total_distance: route.total_distance,
-            total_fare: route.total_fare,
-            stops: sortedStops.map(rs => ({
-              name: rs.stops.name,
-              lat: parseFloat(rs.stops.latitude),
-              lng: parseFloat(rs.stops.longitude),
-              fare_to_next: rs.fare_to_next,
-              distance_to_next: rs.distance_to_next,
-            }))
-          };
-        });
+        // Format routes (handles composite routes)
+        const formattedRoutes = await Promise.all(matchingRoutes.map(route => formatRoute(route)));
 
         // Cache routes for comparison
         const cachedRoutes = routesCacheRef.current;
@@ -880,24 +1008,8 @@ const GhanaTrotroTransit = () => {
         return;
       }
 
-      // Format the routes for the app
-      const formattedRoutes = matchingRoutes.map(route => {
-        const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
-        
-        return {
-          id: route.id,
-          name: route.name,
-          total_distance: route.total_distance,
-          total_fare: route.total_fare,
-          stops: sortedStops.map(rs => ({
-            name: rs.stops.name,
-            lat: parseFloat(rs.stops.latitude),
-            lng: parseFloat(rs.stops.longitude),
-            fare_to_next: rs.fare_to_next,
-            distance_to_next: rs.distance_to_next,
-          }))
-        };
-      });
+      // Format the routes for the app (handles composite routes)
+      const formattedRoutes = await Promise.all(matchingRoutes.map(route => formatRoute(route)));
 
       // Cache routes
       routesCacheRef.current = formattedRoutes;
@@ -1540,34 +1652,115 @@ const GhanaTrotroTransit = () => {
 
           <div className="stops-list">
             <h3 className="stops-title">
-              <span className="stops-title-text">Route Stops</span>
-              <span className="stops-count-badge">{selectedRoute.stops.length} stops</span>
+              <span className="stops-title-text">
+                {selectedRoute.is_composite ? 'Route Journey' : 'Route Stops'}
+              </span>
+              <span className="stops-count-badge">
+                {selectedRoute.is_composite
+                  ? `${selectedRoute.compositionSegments.length + 1} stops`
+                  : `${selectedRoute.stops.length} stops`}
+              </span>
             </h3>
+
             <div className="stops-timeline">
-              {selectedRoute.stops.map((stop, index) => {
+              {selectedRoute.is_composite
+                /* ── Composite route: one row per stop-point (A→B→C→D chain) ── */
+                ? (() => {
+                    const segs = selectedRoute.compositionSegments;
+                    // Build N+1 display nodes: origin + each junction + final destination
+                    // Each node shows the stop name; the card below it describes
+                    // the sub-route leg leaving that stop (nextSeg).
+                    const displayNodes = [
+                      { name: segs[0].fromName, nextSeg: segs[0] },
+                      ...segs.slice(0, -1).map((seg, i) => ({
+                        name:    seg.toName,         // = segs[i+1].fromName
+                        nextSeg: segs[i + 1],
+                      })),
+                      { name: segs[segs.length - 1].toName, nextSeg: null },
+                    ];
+
+                    return displayNodes.map((node, index) => {
+                      const isFirst      = index === 0;
+                      const isLast       = index === displayNodes.length - 1;
+                      const seg          = node.nextSeg;   // leg leaving this stop
+                      const isWalkToNext = !isLast && seg && Number(seg.fare) === 0;
+
+                      return (
+                        <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
+                          <div className="stop-connector">
+                            <div className={`stop-node ${isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid'}`}>
+                              {isFirst ? <MapPin     size={13} color="#fff" /> :
+                               isLast  ? <Navigation size={13} color="#fff" /> :
+                                  <span style={{ fontSize: 9, color: '#fff', fontWeight: 700, lineHeight: 1 }}>{index}</span>}
+                            </div>
+                            {!isLast && (
+                              <div className={`stop-connector-line${isWalkToNext ? ' stop-connector-line--walk' : ''}`} />
+                            )}
+                          </div>
+
+                          <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
+                            <div className="stop-card-top">
+                              <div className="stop-card-label">
+                                <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
+                                  {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
+                                </span>
+                              </div>
+                              {/* Fare / Walk pill for the leg leaving this stop */}
+                              {!isLast && seg && (
+                                Number(seg.fare) === 0
+                                  ? <span className="stop-walk-pill">Walk</span>
+                                  : seg.fare != null && (
+                                      <span className="stop-fare-pill">
+                                        <span className="stop-fare-cedi">₵</span>
+                                        {seg.fare}
+                                      </span>
+                                    )
+                              )}
+                            </div>
+
+                            {/* Stop / junction name */}
+                            <span className="stop-card-name">{node.name}</span>
+
+                            {/* Sub-route label for the outgoing leg */}
+                            {/* {!isLast && seg && (
+                              <div className="stop-card-meta">
+                                <span className="stop-meta-dot" />
+                                <span className="stop-card-distance">via {seg.subRouteName}</span>
+                              </div>
+                            )} */}
+
+                            {!isLast && seg?.distance && (
+                              <div className="stop-card-meta">
+                                <span className="stop-meta-dot" />
+                                <span className="stop-card-distance">{seg.distance} km</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()
+
+                /* ── Normal route: one row per stop ──────────────────────── */
+                : selectedRoute.stops.map((stop, index) => {
   const isFirst  = index === 0;
   const isLast   = index === selectedRoute.stops.length - 1;
   const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
- 
-  // A stop with fare_to_next === 0 means the leg TO the next stop is a walk
   const isWalkToNext = !isLast && Number(stop.fare_to_next) === 0;
- 
+
   return (
     <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
-      {/* Left: connector column */}
       <div className="stop-connector">
         <div className={`stop-node ${stopClass}`}>
           {isFirst  ? <MapPin    size={13} color="#fff" /> :
            isLast   ? <Navigation size={13} color="#fff" /> :
            <span className="stop-node-num">{index}</span>}
         </div>
-        {/* Dashed green line for walk legs, normal line otherwise */}
         {!isLast && (
           <div className={`stop-connector-line${isWalkToNext ? ' stop-connector-line--walk' : ''}`} />
         )}
       </div>
  
-      {/* Right: card */}
       <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
         <div className="stop-card-top">
           <div className="stop-card-label">
@@ -1575,12 +1768,8 @@ const GhanaTrotroTransit = () => {
               {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
             </span>
           </div>
- 
-          {/* Show walk badge OR fare pill */}
           {isWalkToNext ? (
-            <span className="stop-walk-pill">
-              Walk
-            </span>
+            <span className="stop-walk-pill">Walk</span>
           ) : (
             stop.fare_to_next ? (
               <span className="stop-fare-pill">
@@ -1590,9 +1779,7 @@ const GhanaTrotroTransit = () => {
             ) : null
           )}
         </div>
- 
         <span className="stop-card-name">{stop.name}</span>
- 
         {stop.distance_to_next && (
           <div className="stop-card-meta">
             <span className="stop-meta-dot" />
@@ -1607,7 +1794,7 @@ const GhanaTrotroTransit = () => {
           </div>
         </div>
       )}
-      
+
       {showSwipeIndicator && (
         <div className="swipe-indicator">
           <button 
@@ -1867,6 +2054,7 @@ const GhanaTrotroTransit = () => {
         routeCoordinates={memoizedRouteCoordinates}
         stops={memoizedStops}
         mapMode={mapMode}
+        isComposite={selectedRoute?.is_composite ?? false}
       />
 
       {/* App Title in Top Left */}

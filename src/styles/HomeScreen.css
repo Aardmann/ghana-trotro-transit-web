@@ -3710,3 +3710,92 @@ body, #root {
   white-space: nowrap;
   letter-spacing: 0.2px;
 }
+
+/* Breadcrumb: A → B → C → D shown at the top of composite route stops */
+.composition-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(109,33,168,0.06));
+  border: 1px solid rgba(168,85,247,0.2);
+  border-radius: 12px;
+}
+
+.crumb {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.crumb--start {
+  background: #10b981;
+  color: #fff;
+}
+.crumb--mid {
+  background: rgba(168,85,247,0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168,85,247,0.3);
+}
+.crumb--end {
+  background: #ef4444;
+  color: #fff;
+}
+.crumb-arrow {
+  font-size: 13px;
+  color: rgba(168,85,247,0.6);
+  font-weight: 700;
+}
+
+/* Transfer node: purple ring around the stop circle */
+.stop-node--transfer {
+  background: #a855f7 !important;
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.25);
+}
+
+/* Transfer connector line: dashed purple */
+.stop-connector-line--transfer {
+  border-left: 2px dashed rgba(168,85,247,0.5) !important;
+  background: transparent !important;
+}
+
+/* Transfer stop card: subtle purple tint */
+.stop-card--transfer {
+  border-left: 3px solid #a855f7 !important;
+  background: rgba(168,85,247,0.04) !important;
+}
+
+/* Transfer stop tag */
+.stop-tag--transfer {
+  background: rgba(168,85,247,0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168,85,247,0.3);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Leg fare pill: distinct purple instead of green */
+.stop-fare-pill--leg {
+  background: rgba(168,85,247,0.12) !important;
+  color: #a855f7 !important;
+  border: 1px solid rgba(168,85,247,0.3) !important;
+  font-weight: 700;
+}
+
+/* ── MapComponent: transfer marker (purple) ─────────────────────────────── */
+.transfer-marker {
+  background: #a855f7 !important;
+  border: 2px solid rgba(168,85,247,0.4) !important;
+  border-radius: 50% !important;
+  width: 22px !important;
+  height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 0 0 4px rgba(168,85,247,0.2) !important;
+}
