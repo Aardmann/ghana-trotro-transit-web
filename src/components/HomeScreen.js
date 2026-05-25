@@ -14,13 +14,19 @@ import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
 
-const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
+const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
-  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+
+  // Forgot password panel state
+  const [showForgotPanel, setShowForgotPanel] = useState(false);
+  const [fpEmail, setFpEmail] = useState('');
+  const [fpLoading, setFpLoading] = useState(false);
+  const [fpSent, setFpSent] = useState(false);
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -33,6 +39,11 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
       return;
     }
 
+    if (isSignUp && password !== confirmPassword) {
+      alert('Error: Passwords do not match');
+      return;
+    }
+
     if (isSignUp) {
       await onSignUp(email, password, firstName, lastName);
     } else {
@@ -40,28 +51,30 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!email) {
-      alert('Please enter your email address to reset password');
+  const handleForgotPasswordSend = async () => {
+    if (!fpEmail) {
+      alert('Please enter your email address');
       return;
     }
-
-    setForgotPasswordLoading(true);
+    setFpLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
-    });
-
-    if (error) throw error;
-    
-    alert(
-      `Password Reset Email Sent', Check your email (${email}) for the password reset link. The link will expire in 24 hours.`
-    );
+      const { error } = await supabase.auth.resetPasswordForEmail(fpEmail, {
+        redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
+      });
+      if (error) throw error;
+      setFpSent(true);
+      alert('If email is correct, you should recieve a reset email in your email account.')
     } catch (error) {
-      alert(`Error sending reset email. Please try again.,${error.message}`);
+      alert('Error sending reset email: ' + error.message);
     } finally {
-      setForgotPasswordLoading(false);
+      setFpLoading(false);
     }
+  };
+
+  const closeForgotPanel = () => {
+    setShowForgotPanel(false);
+    setFpEmail('');
+    setFpSent(false);
   };
 
   return (
@@ -71,7 +84,7 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
       </h2>
       
       {isSignUp && (
-        <>
+        <div className="auth-name-row">
           <div className="auth-input-container">
             <User size={20} color={COLORS.primary} />
             <input
@@ -81,6 +94,11 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
               onChange={(e) => setFirstName(e.target.value)}
               style={{ color: COLORS.textLight }}
             />
+            {firstName ? (
+              <button className="input-clear-btn" onClick={() => setFirstName('')} tabIndex={-1}>
+                <X size={14} />
+              </button>
+            ) : null}
           </div>
           <div className="auth-input-container">
             <User size={20} color={COLORS.primary} />
@@ -91,8 +109,13 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
               onChange={(e) => setLastName(e.target.value)}
               style={{ color: COLORS.textLight }}
             />
+            {lastName ? (
+              <button className="input-clear-btn" onClick={() => setLastName('')} tabIndex={-1}>
+                <X size={14} />
+              </button>
+            ) : null}
           </div>
-        </>
+        </div>
       )}
       
       <div className="auth-input-container">
@@ -105,6 +128,11 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
           onChange={(e) => setEmail(e.target.value)}
           style={{ color: COLORS.textLight }}
         />
+        {email ? (
+          <button className="input-clear-btn" onClick={() => setEmail('')} tabIndex={-1}>
+            <X size={14} />
+          </button>
+        ) : null}
       </div>
       
       <div className="auth-input-container">
@@ -117,7 +145,31 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
           onChange={(e) => setPassword(e.target.value)}
           style={{ color: COLORS.textLight }}
         />
+        {password ? (
+          <button className="input-clear-btn" onClick={() => setPassword('')} tabIndex={-1}>
+            <X size={14} />
+          </button>
+        ) : null}
       </div>
+
+      {isSignUp && (
+        <div className="auth-input-container">
+          <Lock size={20} color={COLORS.primary} />
+          <input
+            className="auth-input-field"
+            placeholder="Confirm Password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            style={{ color: COLORS.textLight }}
+          />
+          {confirmPassword ? (
+            <button className="input-clear-btn" onClick={() => setConfirmPassword('')} tabIndex={-1}>
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+      )}
       
       <button 
         className={`auth-button ${authLoading ? 'auth-button-disabled' : ''}`}
@@ -128,18 +180,68 @@ const AuthForm = ({ onSignIn, onSignUp, onForgotPassword, authLoading }) => {
       </button>
 
       {!isSignUp && (
-        <button 
-          className="auth-forgot-password"
-          onClick={handleForgotPassword}
-          disabled={forgotPasswordLoading}
-        >
-          {forgotPasswordLoading ? 'Sending...' : 'Forgot Password?'}
-        </button>
+        <>
+          <button
+            className="auth-forgot-password"
+            onClick={() => {
+              setShowForgotPanel(prev => !prev);
+              setFpSent(false);
+              setFpEmail('');
+            }}
+          >
+            Forgot Password?
+          </button>
+
+          {showForgotPanel && (
+            <div className="forgot-password-panel">
+              {fpSent ? (
+                <div className="forgot-password-success">
+                  <CheckCircle size={32} color="#10B981" />
+                  <p className="forgot-password-success-text">
+                    Reset link sent! Check <strong>{fpEmail}</strong> for the password reset link. It expires in 24 hours.
+                  </p>
+                  <button className="forgot-password-done-btn" onClick={closeForgotPanel}>
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p className="forgot-password-label">Enter your email to receive a reset link:</p>
+                  <div className="auth-input-container">
+                    <Mail size={20} color={COLORS.primary} />
+                    <input
+                      className="auth-input-field"
+                      placeholder="Your email address"
+                      type="email"
+                      value={fpEmail}
+                      onChange={(e) => setFpEmail(e.target.value)}
+                    />
+                    {fpEmail ? (
+                      <button className="input-clear-btn" onClick={() => setFpEmail('')} tabIndex={-1}>
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    className={`forgot-password-send-btn${fpLoading ? ' forgot-password-send-btn--disabled' : ''}`}
+                    onClick={handleForgotPasswordSend}
+                    disabled={fpLoading}
+                  >
+                    {fpLoading ? 'Sending...' : 'Send Reset Email'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </>
       )}
       
       <button 
         className="auth-switch"
-        onClick={() => setIsSignUp(!isSignUp)}
+        onClick={() => {
+          setIsSignUp(!isSignUp);
+          closeForgotPanel();
+        }}
       >
         {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
       </button>
@@ -320,6 +422,12 @@ const GhanaTrotroTransit = () => {
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
 
+  // Forgot password panel state (inside profile modal, for logged-in users)
+  const [showForgotPasswordPanel, setShowForgotPasswordPanel] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
+
   // ── Report Issue state ─────────────────────────────────────────────────────
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('');
@@ -437,7 +545,12 @@ const GhanaTrotroTransit = () => {
 
   // Close profile modal when clicking on overlay
   const handleProfileModalOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, () => setShowProfileModal(false));
+    handleOverlayClick(e, () => {
+      setShowProfileModal(false);
+      setShowForgotPasswordPanel(false);
+      setForgotPasswordSent(false);
+      setForgotPasswordEmail('');
+    });
   }, [handleOverlayClick]);
 
   // Close info modal when clicking on overlay
@@ -682,6 +795,25 @@ const GhanaTrotroTransit = () => {
       alert('Error: ' + error.message);
     }
   }, [user]);
+
+  const handleForgotPasswordFromProfile = useCallback(async () => {
+    if (!forgotPasswordEmail) {
+      alert('Please enter your email address');
+      return;
+    }
+    setForgotPasswordLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotPasswordEmail, {
+        redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
+      });
+      if (error) throw error;
+      setForgotPasswordSent(true);
+    } catch (error) {
+      alert('Error sending reset email: ' + error.message);
+    } finally {
+      setForgotPasswordLoading(false);
+    }
+  }, [forgotPasswordEmail]);
 
   const handleSubmitReport = useCallback(async () => {
     if (!reportReason) return;
@@ -1469,6 +1601,11 @@ const GhanaTrotroTransit = () => {
                   ensureConnected();
                 }}
               />
+              {startPoint ? (
+                <button className="input-clear-btn" onClick={() => { setStartPoint(''); setSuggestions([]); }} tabIndex={-1}>
+                  <X size={14} />
+                </button>
+              ) : null}
             </div>
 
             <button 
@@ -1506,6 +1643,11 @@ const GhanaTrotroTransit = () => {
                   ensureConnected();
                 }}
               />
+              {destination ? (
+                <button className="input-clear-btn" onClick={() => { setDestination(''); setSuggestions([]); }} tabIndex={-1}>
+                  <X size={14} />
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -1568,7 +1710,6 @@ const GhanaTrotroTransit = () => {
               <div className="recent-searches-header-left">
                 <History size={16} color={COLORS.primary} />
                 <span className="recent-searches-title">Recent Searches</span>
-                <span className="recent-searches-count">{Math.min(searchHistory.length, 5)}</span>
               </div>
               {showRecentSearches
                 ? <ChevronUp size={18} color={COLORS.textLight} />
@@ -1735,6 +1876,7 @@ const GhanaTrotroTransit = () => {
                   title="Report an issue"
                 >
                   <Flag size={13} color="#000000" />
+                  <span>Report</span>
                 </button>
               </div>
             </div>
@@ -1744,9 +1886,6 @@ const GhanaTrotroTransit = () => {
                 /* ── Composite route: one row per stop-point (A→B→C→D chain) ── */
                 ? (() => {
                     const segs = selectedRoute.compositionSegments;
-                    // Build N+1 display nodes: origin + each junction + final destination
-                    // Each node shows the stop name; the card below it describes
-                    // the sub-route leg leaving that stop (nextSeg).
                     const displayNodes = [
                       { name: segs[0].fromName, nextSeg: segs[0] },
                       ...segs.slice(0, -1).map((seg, i) => ({
@@ -1759,7 +1898,7 @@ const GhanaTrotroTransit = () => {
                     return displayNodes.map((node, index) => {
                       const isFirst      = index === 0;
                       const isLast       = index === displayNodes.length - 1;
-                      const seg          = node.nextSeg;   // leg leaving this stop
+                      const seg          = node.nextSeg;   
                       const isWalkToNext = !isLast && seg && Number(seg.fare) === 0;
 
                       return (
@@ -1820,53 +1959,53 @@ const GhanaTrotroTransit = () => {
 
                 /* ── Normal route: one row per stop ──────────────────────── */
                 : selectedRoute.stops.map((stop, index) => {
-  const isFirst  = index === 0;
-  const isLast   = index === selectedRoute.stops.length - 1;
-  const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
-  const isWalkToNext = !isLast && Number(stop.fare_to_next) === 0;
+                  const isFirst  = index === 0;
+                  const isLast   = index === selectedRoute.stops.length - 1;
+                  const stopClass = isFirst ? 'stop-node--start' : isLast ? 'stop-node--end' : 'stop-node--mid';
+                  const isWalkToNext = !isLast && Number(stop.fare_to_next) === 0;
 
-  return (
-    <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
-      <div className="stop-connector">
-        <div className={`stop-node ${stopClass}`}>
-          {isFirst  ? <MapPin    size={13} color="#fff" /> :
-           isLast   ? <Navigation size={13} color="#fff" /> :
-           <span className="stop-node-num">{index}</span>}
-        </div>
-        {!isLast && (
-          <div className={`stop-connector-line${isWalkToNext ? ' stop-connector-line--walk' : ''}`} />
-        )}
-      </div>
- 
-      <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
-        <div className="stop-card-top">
-          <div className="stop-card-label">
-            <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
-              {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
-            </span>
-          </div>
-          {isWalkToNext ? (
-            <span className="stop-walk-pill">Walk</span>
-          ) : (
-            stop.fare_to_next ? (
-              <span className="stop-fare-pill">
-                <span className="stop-fare-cedi">₵</span>
-                {stop.fare_to_next}
-              </span>
-            ) : null
-          )}
-        </div>
-        <span className="stop-card-name">{stop.name}</span>
-        {stop.distance_to_next && (
-          <div className="stop-card-meta">
-            <span className="stop-meta-dot" />
-            <span className="stop-card-distance">{stop.distance_to_next} km to next stop</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-})}
+                  return (
+                    <div key={index} className={`stop-item-v2 ${isLast ? 'stop-item-v2--last' : ''}`}>
+                      <div className="stop-connector">
+                        <div className={`stop-node ${stopClass}`}>
+                          {isFirst  ? <MapPin    size={13} color="#fff" /> :
+                            isLast ? <Navigation size={13} color="#fff" className='destination-icon'/> :
+                          <span className="stop-node-num">{index}</span>}
+                        </div>
+                        {!isLast && (
+                          <div className={`stop-connector-line${isWalkToNext ? ' stop-connector-line--walk' : ''}`} />
+                        )}
+                      </div>
+                
+                      <div className={`stop-card ${isFirst ? 'stop-card--start' : isLast ? 'stop-card--end' : ''}`}>
+                        <div className="stop-card-top">
+                          <div className="stop-card-label">
+                            <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
+                              {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
+                            </span>
+                          </div>
+                          {isWalkToNext ? (
+                            <span className="stop-walk-pill">Walk</span>
+                          ) : (
+                            stop.fare_to_next ? (
+                              <span className="stop-fare-pill">
+                                <span className="stop-fare-cedi">₵</span>
+                                {stop.fare_to_next}
+                              </span>
+                            ) : null
+                          )}
+                        </div>
+                        <span className="stop-card-name">{stop.name}</span>
+                        {stop.distance_to_next && (
+                          <div className="stop-card-meta">
+                            <span className="stop-meta-dot" />
+                            <span className="stop-card-distance">{stop.distance_to_next} km to next stop</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
 
@@ -2576,7 +2715,6 @@ const GhanaTrotroTransit = () => {
                           'Wrong information',
                           'Suggestion',
                           'Accessibility issue',
-                          'Payment issue',
                           'Account issue',
                           'Other',
                         ]

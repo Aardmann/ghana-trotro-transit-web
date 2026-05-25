@@ -268,11 +268,24 @@ body {
 }
 
 .auth-title {
-  font-size: 18px;
-  font-weight: bold;
+  font-size: 22px;
+  font-weight: 800;
   color: var(--text-color);
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   text-align: center;
+  letter-spacing: -0.3px;
+}
+
+/* First name + last name row */
+.auth-name-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.auth-name-row .auth-input-container {
+  flex: 1;
+  min-width: 0;
 }
 
 .auth-input-container {
@@ -282,6 +295,14 @@ body {
   border-radius: 12px;
   padding: 12px 15px;
   margin-bottom: 12px;
+  border: 1.5px solid transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-input-container:focus-within {
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px rgba(107, 33, 168, 0.08);
+  background-color: #fff;
 }
 
 .auth-input-field {
@@ -292,44 +313,78 @@ body {
   border: none;
   background: transparent;
   outline: none;
+  min-width: 0;
 }
 
 .auth-input-field::placeholder {
   color: var(--text-light);
 }
 
+/* Clear (×) button inside any input */
+.input-clear-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.input-clear-btn:hover {
+  background-color: #e5e7eb;
+  color: var(--text-color);
+}
+
 .auth-button {
   background-color: var(--primary-color);
   border: none;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
   color: white;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   width: 100%;
-  margin: 20px 0;
+  margin: 20px 0 10px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  letter-spacing: 0.2px;
 }
 
 .auth-button:hover {
   background-color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.auth-button:active {
+  transform: translateY(0);
 }
 
 .auth-button:disabled {
   background-color: var(--text-light);
   cursor: not-allowed;
+  transform: none;
 }
 
 .auth-switch {
   background: none;
   border: none;
   color: var(--primary-color);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   text-align: center;
   width: 100%;
+  padding: 6px 0;
+  transition: opacity 0.15s;
+}
+
+.auth-switch:hover {
+  opacity: 0.75;
 }
 
 /* Search section styles */
@@ -348,6 +403,14 @@ body {
   border-radius: 12px;
   padding: 12px;
   min-height: 50px;
+  border: 1.5px solid transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.input-container:focus-within {
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px rgba(107, 33, 168, 0.08);
+  background-color: #fff;
 }
 
 .input {
@@ -358,6 +421,7 @@ body {
   border: none;
   background: transparent;
   outline: none;
+  min-width: 0;
 }
 
 .input::placeholder {
@@ -369,16 +433,18 @@ body {
   height: 40px;
   border-radius: 20px;
   background-color: #F3F4F6;
-  border: none;
+  border: 1.5px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  flex-shrink: 0;
 }
 
 .swap-button:hover {
   background-color: #E5E7EB;
+  transform: rotate(180deg);
 }
 
 .search-button {
@@ -393,17 +459,65 @@ body {
   gap: 8px;
   width: 100%;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.1s ease;
 }
 
-.search-button:hover {
+.search-button:hover:not(:disabled) {
   background-color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.search-button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .search-button-text {
   color: #FFFFFF;
   font-size: 16px;
   font-weight: 600;
+}
+
+/* ── Mobile responsive: ≤ 768px search layout ──────────────────────────────── */
+@media (max-width: 768px) {
+  .input-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Swap button and the start input sit on the same line */
+  .input-container-start {
+    flex: 1 1 85%;
+    width: 90%;
+    margin-left: -10%;
+    order: 1;
+  }
+
+  .swap-button {
+    order: 2;
+    margin-top: -60px;
+    margin-left: 91%
+  }
+
+  /* Destination input goes full width on its own line */
+  .input-container:not(.input-container-start) {
+    order: 3;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  /* Name row stays side-by-side at 768px too */
+  .auth-name-row {
+    flex-direction: row;
+    gap: 10px;
+  }
+}
+
+/* Very small phones: stack name fields */
+@media (max-width: 360px) {
+  .auth-name-row {
+    flex-direction: column;
+    gap: 0;
+  }
 }
 
 /* Banner styles */
@@ -2230,6 +2344,82 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Forgot Password Panel (inside Profile modal) ── */
+.forgot-password-panel {
+  background-color: #f9f5ff;
+  border: 1.5px solid var(--primary-light);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 4px 0 8px;
+  animation: fp-panel-in 0.22s ease;
+}
+
+@keyframes fp-panel-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.forgot-password-label {
+  font-size: 13px;
+  color: var(--text-light);
+  margin-bottom: 10px;
+}
+
+.forgot-password-send-btn {
+  background-color: var(--primary-color);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 0;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.forgot-password-send-btn:hover {
+  background-color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.forgot-password-send-btn--disabled {
+  background-color: var(--text-light);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.forgot-password-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.forgot-password-success-text {
+  font-size: 13px;
+  color: var(--text-color);
+  line-height: 1.5;
+}
+
+.forgot-password-done-btn {
+  background-color: #10B981;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.forgot-password-done-btn:hover {
+  background-color: #059669;
+}
+
 /* Route Information Display Styles */
 .route-info-content {
   padding: 16px;
@@ -2370,14 +2560,14 @@ body {
   }
 
   .input-container-start {
-    margin-left: -50px;
     width: 85%;
+    margin-left: -15%;
   }
 
   .swap-button {
-    margin-top: -130px;
-    margin-right: -300px;
-    margin-bottom: 80px;
+    margin-top: 0px;
+    margin-top: -60px;
+    margin-left: 85%
   }
 }
 
@@ -3349,12 +3539,10 @@ body, #root {
 }
 
 .stop-card--start {
-  border-left: 3px solid #10b981;
   background: linear-gradient(to right, rgba(16,185,129,0.04), #fafafa);
 }
 
 .stop-card--end {
-  border-left: 3px solid #ef4444;
   background: linear-gradient(to right, rgba(239,68,68,0.04), #fafafa);
 }
 
@@ -4011,4 +4199,9 @@ body, #root {
 
 .report-done-button:hover {
   background: #7c3aed;
+}
+
+.destination-icon {
+  margin-top: 1px;
+  margin-left: -1px;
 }
