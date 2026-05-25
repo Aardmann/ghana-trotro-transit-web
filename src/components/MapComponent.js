@@ -1,402 +1,459 @@
-import React, { useEffect, useRef, useCallback } from 'react';
-import './MapComponent.css';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../styles/MapComponent.css';
 
-const TILE_LAYERS = {
-  satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: '© Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19,
-  },
-  street: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '© OpenStreetMap contributors',
-    maxZoom: 19,
-  },
-};
+const MapComponent = React.memo(({
+  center,
+  routeCoordinates,
+  stops,
+  mapMode = 'normal',
+  isComposite = false,
+  onLayerChange,
+}) => {
+  const iframeRef = useRef(null);
 
-const buildArcPath = (map, from, to, arcHeightFactor = 0.35) => {
-  const p1 = map.latLngToLayerPoint(from);
-  const p2 = map.latLngToLayerPoint(to);
+  // Listen for layer-change messages from the iframe
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === 'MAP_LAYER_CHANGE' && onLayerChange) {
+        onLayerChange(e.data.layer);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [onLayerChange]);
 
-  const mx = (p1.x + p2.x) / 2;
-  const my = (p1.y + p2.y) / 2;
+  const generateHTML = useCallback(() => {
+    const lat = center[0];
+    const lng = center[1];
 
-  const dx    = p2.x - p1.x;
-  const dy    = p2.y - p1.y;
-  const chord = Math.sqrt(dx * dx + dy * dy) || 1;
-  const lift  = chord * arcHeightFactor;
+    // Tile-thumbnail helpers (used for the layer-toggle button thumbnail)
+    const Z = 10;
+    const tX = Math.floor(((lng + 180) / 360) * Math.pow(2, Z));
+    const rawY = (1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2;
+    const tY = Math.floor(rawY * Math.pow(2, Z));
 
-  // CW-perpendicular unit vector: (dy, -dx) → pushes downward / to the right
-  const nx =  dy / chord;
-  const ny = -dx / chord;
+    const SAT_THUMB = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Z}/${tY}/${tX}`;
+    const OSM_THUMB = `https://tile.openstreetmap.org/${Z}/${tX}/${tY}.png`;
 
-  return `M ${p1.x} ${p1.y} Q ${mx + nx * lift} ${my + ny * lift} ${p2.x} ${p2.y}`;
-};
+    const stopsJSON = JSON.stringify(stops);
+    const routeJSON = JSON.stringify(routeCoordinates);
+    // Pass the current map layer so the iframe preserves it when route data changes
+    const initialLayer = mapMode === 'satellite' ? 'satellite' : 'normal';
 
-// ─── Component ────────────────────────────────────────────────────────────────
-const MapComponent = React.memo(({ center, routeCoordinates, stops, mapMode = 'satellite', isComposite = false }) => {
-  const mapRef            = useRef(null);
-  const mapInstanceRef    = useRef(null);
-  const routingControlRef = useRef(null);
-  const walkArcsLayerRef  = useRef(null);
-  const walkMarkersRef    = useRef([]);
-  const tileLayerRef      = useRef(null);
-  const isInitializedRef  = useRef(false);
-
-  // ── Leaflet lazy-loader ────────────────────────────────────────────────────
-  const loadLeaflet = useCallback(() => {
-    return new Promise((resolve, reject) => {
-      if (window.L) { resolve(); return; }
-
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-      link.crossOrigin = '';
-      document.head.appendChild(link);
-
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-      script.crossOrigin = '';
-      script.onload = () => {
-        const routingScript = document.createElement('script');
-        routingScript.src =
-          'https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js';
-        routingScript.onload = resolve;
-        routingScript.onerror = reject;
-        document.head.appendChild(routingScript);
-
-        const routingCSS = document.createElement('link');
-        routingCSS.rel = 'stylesheet';
-        routingCSS.href =
-          'https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css';
-        document.head.appendChild(routingCSS);
-      };
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }, []);
-
-  // ── Arc colour ─────────────────────────────────────────────────────────────
-  const getArcColor = useCallback(
-    () => (mapMode === 'satellite' ? '#10b981' : '#99979b'),
-    [mapMode]
-  );
-
-  // ── Clear walk arcs & markers ──────────────────────────────────────────────
-  const clearWalkArcs = useCallback(() => {
-    const map = mapInstanceRef.current;
-    if (walkArcsLayerRef.current && map) {
-      map.removeLayer(walkArcsLayerRef.current);
-      walkArcsLayerRef.current = null;
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"><\/script>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet"/>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+    #map{height:100vh;width:100vw}
+    .map-controls{
+      position:absolute;bottom:30px;left:12px;
+      display:flex;flex-direction:column;gap:8px;z-index:100
     }
-    walkMarkersRef.current.forEach(m => { try { map && map.removeLayer(m); } catch {} });
-    walkMarkersRef.current = [];
-  }, []);
-
-  // SVG arc overlay 
-  const drawWalkArcs = useCallback((walkSegments) => {
-    const map = mapInstanceRef.current;
-    const L   = window.L;
-    if (!map || !L || walkSegments.length === 0) return;
-
-    const SvgArcLayer = L.Layer.extend({
-      initialize(segments, color) {
-        this._segments = segments;
-        this._color    = color;
-      },
-      onAdd(map) {
-        this._map = map;
-        this._svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        Object.assign(this._svg.style, {
-          position: 'absolute', top: 0, left: 0,
-          width: '100%', height: '100%',
-          pointerEvents: 'none', overflow: 'visible', zIndex: 400,
-        });
-        map.getPanes().overlayPane.appendChild(this._svg);
-        this._update = () => this._draw();
-        map.on('moveend zoomend viewreset', this._update);
-        this._draw();
-      },
-      onRemove(map) {
-        map.off('moveend zoomend viewreset', this._update);
-        if (this._svg && this._svg.parentNode) this._svg.parentNode.removeChild(this._svg);
-      },
-      _draw() {
-        const svg = this._svg;
-        while (svg.firstChild) svg.removeChild(svg.firstChild);
-        this._segments.forEach(({ from, to }) => {
-          try {
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', buildArcPath(this._map, from, to));
-            path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', this._color);
-            path.setAttribute('stroke-width', '4');
-            path.setAttribute('stroke-dasharray', '10 8');
-            path.setAttribute('stroke-linecap', 'round');
-            path.setAttribute('opacity', '0.9');
-            svg.appendChild(path);
-          } catch (e) { console.warn('Arc draw error:', e); }
-        });
-      },
-    });
-
-    const layer = new SvgArcLayer(walkSegments, getArcColor());
-    layer.addTo(map);
-    walkArcsLayerRef.current = layer;
-  }, [getArcColor]);
-
-  // ── Main routing update ────────────────────────────────────────────────────
-  const updateMapRouting = useCallback(() => {
-    const map = mapInstanceRef.current;
-    const L   = window.L;
-    if (!map || !L) return;
-
-    // Clear previous routing controls
-    if (routingControlRef.current) {
-      (Array.isArray(routingControlRef.current)
-        ? routingControlRef.current : [routingControlRef.current]
-      ).forEach(ctrl => { try { map.removeControl(ctrl); } catch {} });
-      routingControlRef.current = null;
-    }
-    clearWalkArcs();
-
-    if (!routeCoordinates || routeCoordinates.length < 2) return;
-
-    // Classify segments.
-    // For composite routes: leg-end stops are transfer points, NOT walk segments.
-    // They stay inside the driving segment so road routing draws through them.
-    const drivingSegments = [];
-    const walkSegments    = [];
-    let   currentRun      = [0];
-
-    for (let i = 0; i < routeCoordinates.length - 1; i++) {
-      const stop   = stops && stops[i];
-      // Only arc when fare_to_next is explicitly 0.
-      // Number(null) === 0 is true in JS, so we must check the raw value.
-      const isWalk = stop && stop.fare_to_next === 0;
-      if (isWalk) {
-        if (currentRun.length > 1) drivingSegments.push([...currentRun]);
-        walkSegments.push({
-          from:      L.latLng(routeCoordinates[i][0],     routeCoordinates[i][1]),
-          to:        L.latLng(routeCoordinates[i + 1][0], routeCoordinates[i + 1][1]),
-          stopIndex: i,
-        });
-        currentRun = [i + 1];
-      } else {
-        currentRun.push(i + 1);
+    @media (max-width: 768px) {
+      .map-controls{
+        bottom: 80px;
       }
     }
-    if (currentRun.length > 1) drivingSegments.push([...currentRun]);
+    .ctrl-btn{
+      width:44px;height:44px;border-radius:50%;
+      border:2.5px solid #fff;
+      box-shadow:0 2px 10px rgba(0,0,0,0.45);
+      cursor:pointer;overflow:hidden;background:#fff;
+      display:flex;align-items:center;justify-content:center;
+      -webkit-tap-highlight-color:transparent;user-select:none
+    }
+    .ctrl-btn img{width:100%;height:100%;object-fit:cover;display:block}
+    #compassSvg{transition:transform 0.15s ease-out;display:block}
+    .maplibregl-ctrl-bottom-right,.maplibregl-ctrl-bottom-left,
+    .maplibregl-ctrl-top-right,.maplibregl-ctrl-top-left{display:none}
+    .stop-popup .maplibregl-popup-content{
+      padding:14px 16px;border-radius:16px;background:#fff;
+      box-shadow:0 8px 32px rgba(0,0,0,0.16),0 2px 8px rgba(0,0,0,0.08);
+      border:1px solid #F1F5F9;min-width:180px;max-width:240px
+    }
+    .stop-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip{border-top-color:#fff}
+    .stop-popup.maplibregl-popup-anchor-top    .maplibregl-popup-tip{border-bottom-color:#fff}
+    .stop-popup.maplibregl-popup-anchor-left   .maplibregl-popup-tip{border-right-color:#fff}
+    .stop-popup.maplibregl-popup-anchor-right  .maplibregl-popup-tip{border-left-color:#fff}
+  </style>
+</head>
+<body>
+<div id="map"></div>
 
-    // ── Road routing ───────────────────────────────────────────────────────
-    const controls    = [];
-    let   boundsSet   = false;
+<div class="map-controls">
+  <!-- Compass / north reset -->
+  <div class="ctrl-btn" id="northBtn" onclick="resetBearing()" title="Reset North">
+    <svg id="compassSvg" viewBox="0 0 40 40" width="50" height="50" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="0"/>
+      <path d="M20 4 L23.5 20 L20 18 L16.5 20 Z" fill="#e84040"/>
+      <path d="M20 36 L23.5 20 L20 22 L16.5 20 Z" fill="#9ca3af"/>
+      <circle cx="20" cy="20" r="3" fill="#1e293b"/>
+      <circle cx="20" cy="20" r="1.5" fill="white"/>
+    </svg>
+  </div>
+  <!-- Layer toggle -->
+  <div class="ctrl-btn" id="layerBtn" onclick="toggleLayer()" title="Toggle map layer">
+    <img id="layerThumb" src="" alt="layer"/>
+  </div>
+</div>
 
-    drivingSegments.forEach((indices) => {
-      if (indices.length < 2) return;
-      const waypoints = indices.map(i =>
-        L.latLng(routeCoordinates[i][0], routeCoordinates[i][1])
-      );
-      try {
-        const ctrl = L.Routing.control({
-          waypoints,
-          routeWhileDragging: false,
-          showAlternatives:   false,
-          // Prevent waypoint dragging and adding new waypoints by clicking the line
-          draggableWaypoints: false,
-          addWaypoints:       false,
-          lineOptions: {
-            styles: [{ color: '#6b21a8', opacity: 0.8, weight: 6 }],
-          },
-          createMarker: (index, waypoint) => {
-            const coordIndex = indices[index];
-            const stop       = stops && stops[coordIndex];
-            const stopName   = stop ? stop.name : `Stop ${coordIndex + 1}`;
-            const isFirst    = coordIndex === 0;
-            const isLast     = coordIndex === routeCoordinates.length - 1;
-            // Transfer marker: encoded directly in the stop object by fetchCompositeSegments
-            const isTransfer = stop?.isTransfer === true;
+<script>
+// ── Styles ───────────────────────────────────────────────────────────────────
+var NORMAL_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+var SATELLITE_STYLE = {
+  version:8,
+  sources:{
+    satellite:{
+      type:'raster',
+      tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tileSize:256, maxzoom:19,
+      attribution:'© Esri, Maxar, Earthstar Geographics'
+    }
+  },
+  layers:[{id:'sat', type:'raster', source:'satellite', paint:{'raster-opacity':1}}]
+};
 
-            let className = 'custom-marker';
-            if (isFirst)    className += ' start-marker';
-            if (isLast)     className += ' end-marker';
-            if (isTransfer) className += ' transfer-marker';
+var SAT_THUMB = '${SAT_THUMB}';
+var OSM_THUMB = '${OSM_THUMB}';
 
-            const marker = L.marker(waypoint.latLng, {
-              icon: L.divIcon({
-                className,
-                html: isTransfer
-                  ? `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:9px;">⇄</div>`
-                  : `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:10px;">${coordIndex + 1}</div>`,
-                iconSize: [20, 20], iconAnchor: [10, 10],
-              }),
-            });
-            if (stop) {
-              let popup = `<b>${stopName}</b>`;
-              if (isTransfer) {
-                popup += `<br><em style="color:#a855f7;font-weight:600;">Transfer point</em>`;
-              } else if (stop.fare_to_next) {
-                popup += `<br>Fare to next: GH₵ ${stop.fare_to_next}`;
-              }
-              if (stop.distance_to_next) popup += `<br>Distance: ${stop.distance_to_next} km`;
-              marker.bindPopup(popup);
-            }
-            return marker;
-          },
-        }).addTo(map);
+// ── State ────────────────────────────────────────────────────────────────────
+var currentLayer    = '${initialLayer}';
+var mapReady        = false;
+var routeBounds     = null;
+var stopMarkers     = [];
+var lastRoadGeoJSON = null;
+var lastWalkGeoJSON = null;
 
-        ctrl.on('routesfound', (e) => {
-          // Fit bounds once only (first driving segment that resolves)
-          if (!boundsSet) {
-            boundsSet = true;
-            const coords = e.routes[0]?.coordinates;
-            if (coords && coords.length) {
-              map.fitBounds(
-                coords.reduce((b, c) => b.extend(c), L.latLngBounds(coords[0], coords[0])),
-                { padding: [20, 20] }
-              );
-            }
+// ── Data from React ──────────────────────────────────────────────────────────
+var allStops    = ${stopsJSON};
+var routeCoords = ${routeJSON};
+
+// Walk-segment indices: stop i → i+1 is a walk when fare_to_next === 0
+var walkSegsSet = new Set(
+  allStops.reduce(function(acc, s, i) {
+    if (i < allStops.length - 1 && s.fare_to_next === 0) acc.push(i);
+    return acc;
+  }, [])
+);
+
+// ── Map init — starts on the layer that was active in the parent app ──────────
+var initialStyle = currentLayer === 'satellite' ? SATELLITE_STYLE : NORMAL_STYLE;
+var map = new maplibregl.Map({
+  container:'map',
+  style: initialStyle,
+  center:[${lng}, ${lat}],
+  zoom:13, pitch:45, bearing:0,
+  antialias:true, attributionControl:false
+});
+
+// Thumbnail shows the OTHER layer (what you'll switch TO)
+document.getElementById('layerThumb').src = currentLayer === 'satellite' ? OSM_THUMB : SAT_THUMB;
+
+map.on('load', function() {
+  mapReady = true;
+
+  // 3-D buildings only on normal (OpenFreeMap) style
+  if (currentLayer === 'normal') {
+    try {
+      if (map.getSource('openmaptiles')) {
+        map.addLayer({
+          id:'3d-buildings', source:'openmaptiles', 'source-layer':'building',
+          type:'fill-extrusion', minzoom:14,
+          paint:{
+            'fill-extrusion-color':'#ddd',
+            'fill-extrusion-height':['get','render_height'],
+            'fill-extrusion-base':['get','render_min_height'],
+            'fill-extrusion-opacity':0.5
           }
+        });
+      }
+    } catch(e) {}
+  }
 
-          // Strip pointer-events from the drawn route polyline so clicks
-          // pass through to the map and never trigger waypoint updates.
-          map.eachLayer((layer) => {
-            if (layer._path && layer.options && layer.options.color === '#6b21a8') {
-              layer._path.style.pointerEvents = 'none';
-              layer._path.style.cursor        = 'default';
+  if (allStops.length >= 2) drawRouteWithRoads();
+  drawStops();
+});
+
+// ── Compass — rotates opposite to map bearing ─────────────────────────────────
+function updateCompass() {
+  var needle = document.getElementById('compassSvg');
+  if (needle) needle.style.transform = 'rotate(' + (-map.getBearing()) + 'deg)';
+}
+map.on('rotate', updateCompass);
+map.on('rotateend', updateCompass);
+
+// ── North / bearing reset ─────────────────────────────────────────────────────
+function resetBearing() {
+  map.easeTo({ bearing:0, pitch:45, duration:400 });
+}
+
+// ── Layer toggle ──────────────────────────────────────────────────────────────
+function toggleLayer() {
+  if (currentLayer === 'normal') {
+    // Switch TO satellite
+    map.setStyle(SATELLITE_STYLE);
+    currentLayer = 'satellite';
+    document.getElementById('layerThumb').src = OSM_THUMB;
+    // Notify parent React app of layer change
+    try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'satellite' }, '*'); } catch(e) {}
+    map.once('styledata', function() { mapReady = true; redrawAfterStyleChange(); });
+  } else {
+    // Switch back TO normal
+    map.setStyle(NORMAL_STYLE);
+    currentLayer = 'normal';
+    document.getElementById('layerThumb').src = SAT_THUMB;
+    // Notify parent React app of layer change
+    try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'normal' }, '*'); } catch(e) {}
+    map.once('styledata', function() {
+      mapReady = true;
+      map.setPitch(45);
+      try {
+        if (map.getSource('openmaptiles')) {
+          map.addLayer({
+            id:'3d-buildings', source:'openmaptiles', 'source-layer':'building',
+            type:'fill-extrusion', minzoom:14,
+            paint:{
+              'fill-extrusion-color':'#ddd',
+              'fill-extrusion-height':['get','render_height'],
+              'fill-extrusion-base':['get','render_min_height'],
+              'fill-extrusion-opacity':0.5
             }
           });
-        });
+        }
+      } catch(e) {}
+      redrawAfterStyleChange();
+    });
+  }
+}
 
-        controls.push(ctrl);
-      } catch (err) {
-        console.error('Routing segment error:', err);
-        // Non-interactive fallback polyline
-        const poly = L.polyline(
-          indices.map(i => routeCoordinates[i]),
-          { color: '#6b21a8', weight: 6, opacity: 0.8, lineJoin: 'round', interactive: false }
-        ).addTo(map);
-        if (!boundsSet) { boundsSet = true; map.fitBounds(poly.getBounds()); }
-      }
+// Re-add route lines and stop markers after a style change
+// (sources/layers are lost when the style is swapped)
+function redrawAfterStyleChange() {
+  if (lastRoadGeoJSON) addRouteLayer(lastRoadGeoJSON, lastWalkGeoJSON);
+  drawStops();
+}
+
+// ── Road routing via OSRM ─────────────────────────────────────────────────────
+function drawRouteWithRoads() {
+  if (!mapReady) return;
+
+  var groups = [];
+  var cur = [0];
+  for (var si = 0; si < allStops.length - 1; si++) {
+    if (walkSegsSet.has(si)) {
+      if (cur.length >= 1) groups.push({ type:'road', indices:cur.slice() });
+      groups.push({ type:'walk', indices:[si, si + 1] });
+      cur = [si + 1];
+    } else {
+      cur.push(si + 1);
+    }
+  }
+  if (cur.length > 0) groups.push({ type:'road', indices:cur.slice() });
+
+  var roadFetches = groups.map(function(g) {
+    if (g.type !== 'road' || g.indices.length < 2) return Promise.resolve({ group:g, coords:[] });
+    var waypoints = g.indices
+      .map(function(idx) { return allStops[idx].lng + ',' + allStops[idx].lat; })
+      .join(';');
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + waypoints
+            + '?overview=full&geometries=geojson&steps=false';
+    return fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.routes && d.routes[0]) return { group:g, coords:d.routes[0].geometry.coordinates };
+        return { group:g, coords:g.indices.map(function(i) { return [allStops[i].lng, allStops[i].lat]; }) };
+      })
+      .catch(function() {
+        return { group:g, coords:g.indices.map(function(i) { return [allStops[i].lng, allStops[i].lat]; }) };
+      });
+  });
+
+  Promise.all(roadFetches).then(function(results) {
+    var roadLines = [];
+    results.forEach(function(r) {
+      if (r.group.type === 'road' && r.coords.length > 0) roadLines.push(r.coords);
     });
 
-    routingControlRef.current = controls;
-
-    // ── Walk-stop markers ──────────────────────────────────────────────────
-    const newMarkers = [];
-    walkSegments.forEach(({ from, to, stopIndex }) => {
-      const stop     = stops && stops[stopIndex];
-      const stopName = stop ? stop.name : `Stop ${stopIndex + 1}`;
-      const isFirst  = stopIndex === 0;
-
-      const fromM = L.marker(from, {
-        icon: L.divIcon({
-          className: `custom-marker${isFirst ? ' start-marker' : ''}`,
-          html: `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:10px;">${stopIndex + 1}</div>`,
-          iconSize: [20, 20], iconAnchor: [10, 10],
-        }),
-      }).addTo(map);
-      if (stop) {
-        let popup = `<b>${stopName}</b><br><em style="color:#10B981;font-weight:600;">Walk to next stop</em>`;
-        if (stop.distance_to_next) popup += `<br>Distance: ${stop.distance_to_next} km`;
-        fromM.bindPopup(popup);
-      }
-      newMarkers.push(fromM);
-
-      const nextStop = stops && stops[stopIndex + 1];
-      const nextName = nextStop ? nextStop.name : `Stop ${stopIndex + 2}`;
-      const isLast   = stopIndex + 1 === routeCoordinates.length - 1;
-
-      const toM = L.marker(to, {
-        icon: L.divIcon({
-          className: `custom-marker${isLast ? ' end-marker' : ''}`,
-          html: `<div style="color:white;font-weight:bold;text-align:center;line-height:14px;font-size:10px;">${stopIndex + 2}</div>`,
-          iconSize: [20, 20], iconAnchor: [10, 10],
-        }),
-      }).addTo(map);
-      if (nextStop) {
-        let popup = `<b>${nextName}</b>`;
-        if (nextStop.fare_to_next) popup += `<br>Fare to next: GH₵ ${nextStop.fare_to_next}`;
-        if (nextStop.distance_to_next) popup += `<br>Distance: ${nextStop.distance_to_next} km`;
-        toM.bindPopup(popup);
-      }
-      newMarkers.push(toM);
+    var walkLines = [];
+    groups.forEach(function(g) {
+      if (g.type !== 'walk') return;
+      var from = allStops[g.indices[0]];
+      var to   = allStops[g.indices[1]];
+      if (from.fare_to_next !== 0) return;
+      var arc = buildArc([from.lat, from.lng], [to.lat, to.lng], 40);
+      walkLines.push(arc.map(function(p) { return [p[1], p[0]]; }));
     });
-    walkMarkersRef.current = newMarkers;
 
-    drawWalkArcs(walkSegments);
+    var roadGeoJSON = roadLines.length > 0
+      ? { type:'Feature', geometry:{ type:'MultiLineString', coordinates:roadLines } }
+      : null;
+    var walkGeoJSON = walkLines.length > 0
+      ? { type:'Feature', geometry:{ type:'MultiLineString', coordinates:walkLines } }
+      : null;
 
-    // Fit bounds when the entire route is walking
-    if (drivingSegments.length === 0 && walkSegments.length > 0 && !boundsSet) {
-      map.fitBounds(
-        L.latLngBounds(routeCoordinates.map(c => L.latLng(c[0], c[1]))),
-        { padding: [20, 20] }
+    lastRoadGeoJSON = roadGeoJSON;
+    lastWalkGeoJSON = walkGeoJSON;
+    addRouteLayer(roadGeoJSON, walkGeoJSON);
+
+    var allCoords = allStops.map(function(s) { return [s.lng, s.lat]; });
+    roadLines.forEach(function(line) { line.forEach(function(c) { allCoords.push(c); }); });
+    if (allCoords.length > 0) {
+      var bounds = allCoords.reduce(
+        function(b, c) { return b.extend(c); },
+        new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
       );
+      routeBounds = bounds;
+      map.fitBounds(bounds, { padding:60, animate:true, duration:800 });
     }
-  }, [routeCoordinates, stops, isComposite, clearWalkArcs, drawWalkArcs]);
+  });
+}
 
-  // ── Tile layer switch ──────────────────────────────────────────────────────
-  const updateTileLayer = useCallback(() => {
-    const map = mapInstanceRef.current;
-    const L   = window.L;
-    if (!map || !L) return;
-    const cfg = TILE_LAYERS[mapMode] || TILE_LAYERS.satellite;
-    if (tileLayerRef.current) map.removeLayer(tileLayerRef.current);
-    tileLayerRef.current = L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom }).addTo(map);
-    tileLayerRef.current.bringToBack();
-  }, [mapMode]);
+function addRouteLayer(roadGeoJSON, walkGeoJSON) {
+  ['route-line','walk-line'].forEach(function(id) { if (map.getLayer(id))  map.removeLayer(id); });
+  ['route-src', 'walk-src' ].forEach(function(id) { if (map.getSource(id)) map.removeSource(id); });
 
-  const recolorWalkArcs = useCallback(() => {
-    if (walkArcsLayerRef.current) {
-      walkArcsLayerRef.current._color = getArcColor();
-      walkArcsLayerRef.current._draw?.();
-    }
-  }, [getArcColor]);
+  if (roadGeoJSON) {
+    map.addSource('route-src', { type:'geojson', data:roadGeoJSON });
+    map.addLayer({
+      id:'route-line', type:'line', source:'route-src',
+      layout:{ 'line-join':'round', 'line-cap':'round' },
+      paint:{ 'line-color':'#6b21a8', 'line-width':6, 'line-opacity':0.9 }
+    });
+  }
 
-  // ── Initialization ─────────────────────────────────────────────────────────
-  const initializeMap = useCallback(async () => {
-    if (isInitializedRef.current || !mapRef.current) return;
-    try {
-      await loadLeaflet();
-      isInitializedRef.current = true;
-      if (!mapInstanceRef.current) {
-        const map = window.L.map(mapRef.current).setView(center, 15);
-        mapInstanceRef.current = map;
-        const cfg = TILE_LAYERS[mapMode] || TILE_LAYERS.satellite;
-        tileLayerRef.current = window.L.tileLayer(cfg.url, { attribution: cfg.attribution, maxZoom: cfg.maxZoom }).addTo(map);
+  if (walkGeoJSON) {
+    map.addSource('walk-src', { type:'geojson', data:walkGeoJSON });
+    map.addLayer({
+      id:'walk-line', type:'line', source:'walk-src',
+      layout:{ 'line-join':'round', 'line-cap':'round' },
+      paint:{ 'line-color':'#10B981', 'line-width':5, 'line-opacity':0.9, 'line-dasharray':[2,2] }
+    });
+  }
+}
+
+// Quadratic Bézier arc between two lat/lng points
+function buildArc(from, to, n) {
+  var mLat = (from[0] + to[0]) / 2;
+  var mLng = (from[1] + to[1]) / 2;
+  var d    = Math.sqrt(Math.pow(to[0] - from[0], 2) + Math.pow(to[1] - from[1], 2));
+  var h    = Math.max(d * 0.2, 0.001);
+  var pts  = [];
+  for (var i = 0; i <= n; i++) {
+    var t = i / n, t1 = 1 - t;
+    pts.push([
+      t1 * t1 * from[0] + 2 * t1 * t * (mLat + h) + t * t * to[0],
+      t1 * t1 * from[1] + 2 * t1 * t *  mLng       + t * t * to[1]
+    ]);
+  }
+  return pts;
+}
+
+// ── Stop markers ──────────────────────────────────────────────────────────────
+function drawStops() {
+  stopMarkers.forEach(function(m) { m.remove(); });
+  stopMarkers = [];
+  if (!mapReady) return;
+
+  allStops.forEach(function(stop, i) {
+    var isFirst = i === 0;
+    var isLast  = i === allStops.length - 1;
+    var isXfer  = stop.isTransfer === true;
+
+    var color  = isFirst ? '#10B981' : isLast ? '#EF4444' : isXfer ? '#F59E0B' : '#6b21a8';
+    var border = isFirst ? '#D1FAE5' : isLast ? '#FEE2E2' : isXfer ? '#FEF3C7' : '#EDE9FE';
+    var size   = (isFirst || isLast) ? 18 : 14;
+
+    var el = document.createElement('div');
+    el.style.cssText =
+      'width:' + size + 'px;height:' + size + 'px;border-radius:50%;' +
+      'background:' + color + ';border:3px solid ' + border + ';' +
+      'box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer';
+
+    var roleLabel = isFirst ? 'Start' : isLast ? 'Destination' : isXfer ? 'Transfer' : ('Stop ' + i);
+    var roleBg    = isFirst ? '#D1FAE5' : isLast ? '#FEE2E2' : isXfer ? '#FEF3C7' : '#EDE9FE';
+    var roleColor = isFirst ? '#065F46' : isLast ? '#991B1B' : isXfer ? '#92400E' : '#5B21B6';
+
+    var fareHtml = '';
+    if (!isLast) {
+      if (stop.fare_to_next === 0) {
+        fareHtml = '<span style="display:inline-flex;align-items:center;gap:4px;'
+          + 'background:#D1FAE5;border:1px solid #A7F3D0;border-radius:12px;'
+          + 'padding:3px 10px;font-size:11px;font-weight:700;color:#065F46;">'
+          + '<i style="width:6px;height:6px;border-radius:50%;background:#10B981;'
+          + 'display:inline-block;font-style:normal;"></i>Walk to next</span>';
+      } else if (stop.fare_to_next != null) {
+        fareHtml = '<span style="display:inline-block;background:#EDE9FE;'
+          + 'border:1px solid #DDD6FE;border-radius:12px;padding:3px 10px;'
+          + 'font-size:11px;font-weight:700;color:#5B21B6;">'
+          + 'GH&#8373; ' + stop.fare_to_next + '</span>';
       }
-      updateMapRouting();
-    } catch (err) { console.error('Error initializing map:', err); }
-  }, [center, loadLeaflet, mapMode, updateMapRouting]);
-
-  // ── Effects ────────────────────────────────────────────────────────────────
-  useEffect(() => { initializeMap(); }, [initializeMap]);
-
-  useEffect(() => {
-    if (isInitializedRef.current && mapInstanceRef.current) {
-      updateTileLayer();
-      recolorWalkArcs();
     }
-  }, [updateTileLayer, recolorWalkArcs]);
+
+    var distHtml = '';
+    if (!isLast && stop.distance_to_next != null) {
+      distHtml = '<span style="display:inline-block;background:#F1F5F9;'
+        + 'border:1px solid #E2E8F0;border-radius:12px;padding:3px 10px;'
+        + 'font-size:11px;font-weight:600;color:#475569;">'
+        + stop.distance_to_next + ' km</span>';
+    }
+
+    var badgesHtml = (fareHtml || distHtml)
+      ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">' + fareHtml + distHtml + '</div>'
+      : '';
+
+    var html =
+      '<div style="font-family:system-ui,-apple-system,sans-serif;">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">' +
+          '<i style="width:8px;height:8px;border-radius:50%;background:' + color +
+            ';display:inline-block;font-style:normal;flex-shrink:0;"></i>' +
+          '<span style="font-size:11px;font-weight:700;color:' + roleColor +
+            ';background:' + roleBg + ';border-radius:20px;padding:2px 8px;">' + roleLabel + '</span>' +
+        '</div>' +
+        '<div style="font-size:15px;font-weight:800;color:#1E293B;line-height:1.3;">' + stop.name + '</div>' +
+        '<div style="height:1px;background:#F1F5F9;margin:8px 0;"></div>' +
+        badgesHtml +
+      '</div>';
+
+    var popup = new maplibregl.Popup({ offset:20, className:'stop-popup' }).setHTML(html);
+    var m     = new maplibregl.Marker({ element:el })
+      .setLngLat([stop.lng, stop.lat])
+      .setPopup(popup)
+      .addTo(map);
+    stopMarkers.push(m);
+  });
+}
+</script>
+</body>
+</html>`;
+  }, [center, routeCoordinates, stops]);
+
+  const html = useMemo(() => generateHTML(), [generateHTML]);
+
+  const [blobUrl, setBlobUrl] = useState(null);
 
   useEffect(() => {
-    if (isInitializedRef.current) updateMapRouting();
-  }, [updateMapRouting]);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [html]);
 
-  useEffect(() => {
-    return () => {
-      if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-      routingControlRef.current = null;
-      walkArcsLayerRef.current  = null;
-      walkMarkersRef.current    = [];
-      tileLayerRef.current      = null;
-      isInitializedRef.current  = false;
-    };
-  }, []);
-
-  return <div ref={mapRef} className="map-container" />;
+  return (
+    <iframe
+      ref={iframeRef}
+      src={blobUrl || 'about:blank'}
+      className="map-container"
+      style={{ border: 'none', width: '100%', height: '100%', display: 'block' }}
+      title="Ghana Trotro Transit Map"
+      allow="geolocation"
+    />
+  );
 });
 
 MapComponent.displayName = 'MapComponent';

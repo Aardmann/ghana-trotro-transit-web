@@ -7,7 +7,7 @@ import {
   ArrowLeft, ArrowRight, Trash2,
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
-  Wind, Type, RefreshCw, Radio
+  Wind, Type, RefreshCw, Radio, Flag, Check
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
@@ -320,8 +320,17 @@ const GhanaTrotroTransit = () => {
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
 
-  // Map layer mode: 'satellite' | 'street'
-  const [mapMode, setMapMode] = useState('satellite');
+  // ── Report Issue state ─────────────────────────────────────────────────────
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportNote, setReportNote] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState(false);
+  // true = general report (from profile, no route attached); false = route report
+  const [isGeneralReport, setIsGeneralReport] = useState(false);
+
+  // Map layer mode: 'normal' | 'satellite'
+  const [mapMode, setMapMode] = useState('normal');
 
   // Recent searches panel – persisted to localStorage
   const [showRecentSearches, setShowRecentSearches] = useState(() => {
@@ -372,6 +381,31 @@ const GhanaTrotroTransit = () => {
   const [sheetDragHeight, setSheetDragHeight] = useState(SNAP_HEIGHTS[1]);
   const [sheetIsDragging, setSheetIsDragging] = useState(false);
   const sheetDragRef = useRef({ active: false, startY: 0, startH: SNAP_HEIGHTS[1], currentH: SNAP_HEIGHTS[1] });
+
+  // ── Dynamic sheet height based on stop count ──────────────────────────────
+  // Each stop row ~72px, header ~160px, summary cards ~80px, padding ~40px.
+  // The computed height becomes the maximum snap point for this route.
+  useEffect(() => {
+    if (!selectedRoute) return;
+    const stopCount = selectedRoute.is_composite
+      ? (selectedRoute.compositionSegments?.length ?? 0) + 1
+      : (selectedRoute.stops?.length ?? 0);
+    const viewportH = window.innerHeight;
+    const estimatedPx = 160 + 80 + stopCount * 72 + 40;
+    const estimatedVh = Math.round((estimatedPx / viewportH) * 100);
+    // Clamp: min 42 vh, max 88 vh — this is the new "full" snap
+    const fullSnap = Math.min(Math.max(estimatedVh, 42), 88);
+    // Rebuild snap points with the computed full height
+    const newSnaps = [32, Math.round((32 + fullSnap) / 2), fullSnap];
+    // Start at the mid snap
+    const midIdx = 1;
+    setSheetDragHeight(newSnaps[midIdx]);
+    setSheetSnapIndex(midIdx);
+    sheetDragRef.current.currentH = newSnaps[midIdx];
+    sheetDragRef.current.startH   = newSnaps[midIdx];
+    // Store dynamic snaps for drag handler
+    sheetDragRef.current.snapHeights = newSnaps;
+  }, [selectedRoute]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -648,6 +682,37 @@ const GhanaTrotroTransit = () => {
       alert('Error: ' + error.message);
     }
   }, [user]);
+
+  const handleSubmitReport = useCallback(async () => {
+    if (!reportReason) return;
+    setReportSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('reports')
+        .insert({
+          // For general reports (from profile), no route is attached
+          route_id:   isGeneralReport ? null : (selectedRoute?.id ?? null),
+          route_name: isGeneralReport ? null : (selectedRoute?.name ?? null),
+          user_id:    user?.id ?? null,
+          reason:     reportReason,
+          message:    reportNote.trim() || null,
+        });
+      if (error) throw error;
+      setReportSuccess(true);
+    } catch (err) {
+      alert('Failed to submit report. Please try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [reportReason, reportNote, selectedRoute, user, isGeneralReport]);
+
+  const closeReportModal = useCallback(() => {
+    setShowReportModal(false);
+    setReportReason('');
+    setReportNote('');
+    setReportSuccess(false);
+    setIsGeneralReport(false);
+  }, []);
 
   const fetchRouteInfo = useCallback(async (routeId) => {
     if (!routeId) {
@@ -1147,14 +1212,16 @@ const GhanaTrotroTransit = () => {
   const handleSheetHandlePointerDown = useCallback((e) => {
     e.stopPropagation();
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
     sheetDragRef.current = {
+      ...sheetDragRef.current,
       active: true,
       startY: clientY,
-      startH: SNAP_HEIGHTS[sheetSnapIndex],
-      currentH: SNAP_HEIGHTS[sheetSnapIndex],
+      startH: snaps[sheetSnapIndex] ?? sheetDragHeight,
+      currentH: snaps[sheetSnapIndex] ?? sheetDragHeight,
     };
     setSheetIsDragging(true);
-  }, [sheetSnapIndex]);
+  }, [sheetSnapIndex, sheetDragHeight]);
 
   useEffect(() => {
     if (!sheetIsDragging) return;
@@ -1170,14 +1237,15 @@ const GhanaTrotroTransit = () => {
 
     const onUp = () => {
       const h = sheetDragRef.current.currentH;
+      const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
       let nearest = 0;
       let minDist = Infinity;
-      SNAP_HEIGHTS.forEach((sh, i) => {
+      snaps.forEach((sh, i) => {
         const dist = Math.abs(sh - h);
         if (dist < minDist) { minDist = dist; nearest = i; }
       });
       setSheetSnapIndex(nearest);
-      setSheetDragHeight(SNAP_HEIGHTS[nearest]);
+      setSheetDragHeight(snaps[nearest]);
       setSheetIsDragging(false);
     };
 
@@ -1651,16 +1719,25 @@ const GhanaTrotroTransit = () => {
           )}
 
           <div className="stops-list">
-            <h3 className="stops-title">
+            <div className="stops-title">
               <span className="stops-title-text">
-                {selectedRoute.is_composite ? 'Route Journey' : 'Route Stops'}
+                Route Stops
               </span>
-              <span className="stops-count-badge">
-                {selectedRoute.is_composite
-                  ? `${selectedRoute.compositionSegments.length + 1} stops`
-                  : `${selectedRoute.stops.length} stops`}
-              </span>
-            </h3>
+              <div className="stops-title-actions">
+                <span className="stops-count-badge">
+                  {selectedRoute.is_composite
+                    ? `${selectedRoute.compositionSegments.length + 1} stops`
+                    : `${selectedRoute.stops.length} stops`}
+                </span>
+                <button
+                  className="report-inline-button"
+                  onClick={() => { setIsGeneralReport(false); setShowReportModal(true); }}
+                  title="Report an issue"
+                >
+                  <Flag size={13} color="#000000" />
+                </button>
+              </div>
+            </div>
 
             <div className="stops-timeline">
               {selectedRoute.is_composite
@@ -1792,6 +1869,7 @@ const GhanaTrotroTransit = () => {
 })}
             </div>
           </div>
+
         </div>
       )}
 
@@ -1807,7 +1885,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
     </div>
-  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime]);
+  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime, setShowReportModal, setIsGeneralReport]);
 
   // Render route info with realtime indicator
   const renderRouteInfo = useCallback(() => (
@@ -2055,6 +2133,7 @@ const GhanaTrotroTransit = () => {
         stops={memoizedStops}
         mapMode={mapMode}
         isComposite={selectedRoute?.is_composite ?? false}
+        onLayerChange={setMapMode}
       />
 
       {/* App Title in Top Left */}
@@ -2101,28 +2180,6 @@ const GhanaTrotroTransit = () => {
       {/* Info Button with conditional opacity */}
       <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
         <Info size={20} color="#FFFFFF" />
-      </button>
-
-      {/* Map Mode Toggle Button — bottom left */}
-      <button
-        className="map-mode-button"
-        onClick={() => setMapMode(prev => prev === 'satellite' ? 'street' : 'satellite')}
-        title={mapMode === 'satellite' ? 'Switch to Street map' : 'Switch to Satellite'}
-      >
-        <img
-          src={
-            mapMode === 'satellite'
-              /* Show street-map thumbnail when currently in satellite mode */
-              ? 'https://tile.openstreetmap.org/13/4090/3969.png'
-              /* Show satellite thumbnail when currently in street mode */
-              : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/3969/4090'
-          }
-          alt={mapMode === 'satellite' ? 'Switch to Street' : 'Switch to Satellite'}
-          className="map-mode-thumb"
-        />
-        <span className="map-mode-label">
-          {mapMode === 'satellite' ? 'Map' : 'Satellite'}
-        </span>
       </button>
 
       {/* Bottom Sheet - Slides up from bottom, draggable */}
@@ -2216,6 +2273,19 @@ const GhanaTrotroTransit = () => {
                   >
                     <History size={20} color={COLORS.primary} />
                     <span className="profile-option-text">Search History</span>
+                  </button>
+
+                  <button
+                    className="profile-option report-option"
+                    onClick={() => {
+                      setShowProfileModal(false);
+                      setIsGeneralReport(true);
+                      setTimeout(() => setShowReportModal(true), 200);
+                    }}
+                  >
+                    <Flag size={20} color="#000000" />
+                    <span className="profile-option-text" style={{ color: '#000000' }}>Report an Issue
+                    </span>
                   </button>
 
                   <button 
@@ -2453,6 +2523,105 @@ const GhanaTrotroTransit = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Report Issue Modal ── */}
+      {showReportModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) closeReportModal(); }}
+        >
+          <div className="modal report-modal">
+            {reportSuccess ? (
+              /* Success state */
+              <div className="report-success">
+                <div className="report-success-icon">
+                  <Check size={32} color="#10B981" />
+                </div>
+                <h3 className="report-success-title">Report Sent!</h3>
+                <p className="report-success-msg">
+                  Thanks for letting us know. We&apos;ll look into this shortly.
+                </p>
+                <button className="report-done-button" onClick={closeReportModal}>
+                  Done
+                </button>
+              </div>
+            ) : (
+              /* Report form */
+              <>
+                <div className="modal-header">
+                  <div className="report-modal-title-row">
+                    <Flag size={18} color="#000000" />
+                    <h2 className="modal-title">
+                      {isGeneralReport ? 'General Report' : 'Report Route Issue'}
+                    </h2>
+                  </div>
+                  <button className="close-button" onClick={closeReportModal}>
+                    <X size={24} color={COLORS.text} />
+                  </button>
+                </div>
+
+                {!isGeneralReport && selectedRoute?.name && (
+                  <p className="report-route-name">{selectedRoute.name}</p>
+                )}
+
+                <div className="modal-content">
+                  <p className="report-section-label">Select a reason *</p>
+                  <div className="report-reasons-grid">
+                    {(isGeneralReport
+                      ? [
+                          'App Bug',
+                          'Wrong information',
+                          'Suggestion',
+                          'Accessibility issue',
+                          'Payment issue',
+                          'Account issue',
+                          'Other',
+                        ]
+                      : [
+                          'Incorrect fare',
+                          'Wrong route stops',
+                          'Route no longer exists',
+                          'Duplicate route',
+                          'Inaccurate distance',
+                          'App Bug',
+                          'Suggestion',
+                          'Other',
+                        ]
+                    ).map((reason) => (
+                      <button
+                        key={reason}
+                        className={`report-chip ${reportReason === reason ? 'report-chip-selected' : ''}`}
+                        onClick={() => setReportReason(reason)}
+                      >
+                        {reason}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="report-section-label">Additional details (optional)</p>
+                  <textarea
+                    className="report-textarea"
+                    placeholder="Describe the issue in more detail..."
+                    value={reportNote}
+                    onChange={(e) => setReportNote(e.target.value)}
+                    maxLength={500}
+                    rows={4}
+                  />
+                  <span className="report-char-count">{reportNote.length}/500</span>
+
+                  <button
+                    className={`report-submit-button${(!reportReason || reportSubmitting) ? ' report-submit-disabled' : ''}`}
+                    onClick={handleSubmitReport}
+                    disabled={!reportReason || reportSubmitting}
+                  >
+                    {reportSubmitting ? 'Sending...' : 'Send Report'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

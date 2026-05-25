@@ -43,7 +43,7 @@ body {
   transition: transform 0.2s ease;
 }
 
-.profile-button:hover, .plus-button:hover, .info-button:hover, .floating-button:hover {
+.profile-button:hover, .plus-button:hover, .info-button:hover:hover {
   transform: scale(1.05);
   background-color: #8b5cf6;
 }
@@ -130,9 +130,8 @@ body {
   left: 50px;
   z-index: 1000;
   color: #6b21a8;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: bold;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 .app-title-top-left h4 {
@@ -475,13 +474,6 @@ body {
   margin-top: 16px;
 }
 
-.stops-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color);
-  margin-bottom: 12px;
-}
-
 .stop-item {
   display: flex;
   align-items: flex-start;
@@ -609,6 +601,11 @@ body {
   overflow-y: auto;
 }
 
+.floating-button{
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
 /* Responsive design */
 @media (max-width: 768px) {
   .search-modal, .route-modal, .modal {
@@ -643,8 +640,6 @@ body {
 
   .floating-button{
     bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
   }
 
   .info-button{
@@ -1862,10 +1857,11 @@ body {
 }
 
 .stops-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-color);
-  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 8px;
 }
 
 .stops-timeline {
@@ -3205,10 +3201,6 @@ body, #root {
   }
 }
 
-/* ══════════════════════════════════════════════════════════
-   REDESIGNED ROUTE STOPS TIMELINE
-══════════════════════════════════════════════════════════ */
-
 .stops-title {
   display: flex;
   align-items: center;
@@ -3217,18 +3209,52 @@ body, #root {
 }
 
 .stops-title-text {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  color: var(--text-color);
+  color: #1E293B;
+  flex: 1;
+}
+
+.stops-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .stops-count-badge {
+  display: inline-flex;
+  align-items: center;
+  background: #EDE9FE;
+  color: #6b21a8;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.report-inline-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #e8e8e8;
+  border: 1px solid #232323;
+  border-radius: 20px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.report-inline-button:hover {
+  background: #d8d8d8;
+}
+ 
+.report-inline-button span {
   font-size: 11px;
   font-weight: 600;
-  color: var(--primary-color);
-  background: rgba(107, 33, 168, 0.08);
-  padding: 3px 9px;
-  border-radius: 20px;
+  color: #000000;
 }
 
 /* Each row in the timeline */
@@ -3798,4 +3824,191 @@ body, #root {
   align-items: center !important;
   justify-content: center !important;
   box-shadow: 0 0 0 4px rgba(168,85,247,0.2) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────────
+   HomeScreen.css  —  ADDITIONS  (append to existing file)
+   Report-issue feature + map iframe reset
+   ──────────────────────────────────────────────────────────────────────────────*/
+
+/* ── MapComponent iframe ────────────────────────────────────────────────────── */
+/* Ensure the <iframe> fills its container exactly like the old Leaflet div */
+.map-container {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+  display: block !important;
+}
+
+/* ── Report option in profile modal ─────────────────────────────────────────── */
+.report-option {
+  background: #F8FAFC !important;
+}
+
+.report-option:hover {
+  background: #e2e2e2 !important;
+}
+
+/* ── Report Modal ────────────────────────────────────────────────────────────── */
+.report-modal {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.report-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report-route-name {
+  font-size: 13px;
+  color: #64748B;
+  font-weight: 600;
+  padding: 0 16px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.report-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 10px;
+  margin-top: 4px;
+}
+
+.report-reasons-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.report-chip {
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1.5px solid #E2E8F0;
+  background: #F8FAFC;
+  color: #64748B;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.report-chip:hover {
+  border-color: #7c3aed;
+  background: #F5F3FF;
+  color: #6b21a8;
+}
+
+.report-chip-selected {
+  border-color: #6b21a8;
+  background: #EDE9FE;
+  color: #6b21a8;
+  font-weight: 700;
+}
+
+.report-textarea {
+  width: 100%;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #1E293B;
+  background: #FFFFFF;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.report-textarea:focus {
+  outline: none;
+  border-color: #6b21a8;
+}
+
+.report-char-count {
+  display: block;
+  font-size: 11px;
+  color: #94A3B8;
+  text-align: right;
+  margin-top: 4px;
+  margin-bottom: 20px;
+}
+
+.report-submit-button {
+  width: 100%;
+  background: #6b21a8;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 20px;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.report-submit-button:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.report-submit-disabled {
+  background: #CBD5E1 !important;
+  cursor: not-allowed;
+}
+
+/* ── Report success state ────────────────────────────────────────────────────── */
+.report-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 24px;
+  gap: 12px;
+  text-align: center;
+}
+
+.report-success-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  background: #D1FAE5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.report-success-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #1E293B;
+  margin: 0;
+}
+
+.report-success-msg {
+  font-size: 14px;
+  color: #64748B;
+  line-height: 1.6;
+  margin: 0 0 8px;
+}
+
+.report-done-button {
+  background: #6b21a8;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 20px;
+  padding: 12px 40px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.report-done-button:hover {
+  background: #7c3aed;
 }
