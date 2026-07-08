@@ -2,7 +2,6 @@
   "name": "ghana-trotro-transit-web",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://aardmann.github.io/ghana-trotro-transit-web",
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
     "@testing-library/dom": "^10.4.1",
