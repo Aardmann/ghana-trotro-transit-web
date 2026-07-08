@@ -671,6 +671,7 @@ body {
   justify-content: center;
   align-items: center;
   margin-bottom: 16px;
+  box-shadow: 0 3px 5px #6b21a8d0;
 }
 
 .avatar-text {
@@ -923,6 +924,7 @@ body {
 /* Profile Options */
 .profile-options {
   margin-top: 20px;
+  padding: 0 10px;
 }
 
 .profile-option {
@@ -936,6 +938,7 @@ body {
   margin-bottom: 12px;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  box-shadow: 0 5px 10px 1px rgba(0, 0, 0, 0.1);
 }
 
 .profile-option:hover {
@@ -2207,7 +2210,7 @@ body {
 .close-button {
   background: #F8FAFC;
   border: none;
-  border-radius: 12px;
+  border-radius: 50%;
   padding: 10px;
   cursor: pointer;
   display: flex;

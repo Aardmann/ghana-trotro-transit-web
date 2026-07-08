@@ -59,7 +59,7 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
     setFpLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(fpEmail, {
-        redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
+        redirectTo: 'https://user-gtt.nxnx.tech/reset-password',
       });
       if (error) throw error;
       setFpSent(true);
@@ -786,7 +786,7 @@ const GhanaTrotroTransit = () => {
     
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(user.email,{
-        redirectTo: "https://ghanatrotrotransit.netlify.app/reset-password/"
+        redirectTo: "https://user-gtt.nxnx.tech/reset-password/"
       });
       if (error) throw error;
       
@@ -804,7 +804,7 @@ const GhanaTrotroTransit = () => {
     setForgotPasswordLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(forgotPasswordEmail, {
-        redirectTo: 'https://ghanatrotrotransit.netlify.app/reset-password',
+        redirectTo: 'https://user-gtt.nxnx.tech/reset-password',
       });
       if (error) throw error;
       setForgotPasswordSent(true);
@@ -1774,6 +1774,7 @@ const GhanaTrotroTransit = () => {
       <div className="sheet-header">
         <div className="header-content">
           <h2 className="route-name">{selectedRoute?.name || 'Route Details'}</h2>
+
           <p className="route-subtitle">
             Ghana Trotro Transit Route
           </p>
@@ -2512,12 +2513,12 @@ const GhanaTrotroTransit = () => {
                   </div>
                   <div className="contact-item">
                     <Mail size={16} color={COLORS.primary} />
-                    <span className="contact-text">nananketia07@gmail.com</span>
+                    <span className="contact-text">nxnxtech@gmail.com</span>
                   </div>
                   <div className="contact-item">
                     <Globe size={16} color={COLORS.primary} />
                     <span className="contact-text">
-                      <a className="contact-text-help" href='https://ghana-trotro-transit.netlify.app' target='_blank' rel="noreferrer">https://ghana-trotro-transit.netlify.app</a>
+                      <a className="contact-text-help" href='https://gtt.nxnx.tech' target='_blank' rel="noreferrer">https://gtt.nxnx.tech</a>
                     </span>
                   </div>
                 </div>
@@ -2561,7 +2562,7 @@ const GhanaTrotroTransit = () => {
               </p>
               <div className="download-app-buttons">
                 <a
-                  href="https://ghana-trotro-transit.netlify.app/#download"
+                  href="https://gtt.nxnx.tech/#download"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="store-button store-button-ios"
@@ -2572,7 +2573,7 @@ const GhanaTrotroTransit = () => {
                   <span>App Store</span>
                 </a>
                 <a
-                  href="https://ghana-trotro-transit.netlify.app/#download"
+                  href="https://gtt.nxnx.tech/#download"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="store-button store-button-android"
