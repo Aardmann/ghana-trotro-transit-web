@@ -10,6 +10,12 @@ import {
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
+import {
+  getSearchHistoryFromCookie,
+  addSearchToCookie,
+  deleteSearchFromCookie,
+  clearSearchHistoryCookie,
+} from '../config/cookies';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
@@ -414,10 +420,11 @@ const GhanaTrotroTransit = () => {
   const [bottomSheetContent, setBottomSheetContent] = useState('search'); // 'search' or 'route'
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSearchHistoryModal, setShowSearchHistoryModal] = useState(false);
+  const [showRouteNotFoundModal, setShowRouteNotFoundModal] = useState(false);
   
   // History states
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
-  const [searchHistory, setSearchHistory] = useState([]);
+  const [searchHistory, setSearchHistory] = useState(() => getSearchHistoryFromCookie());
 
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
@@ -563,6 +570,11 @@ const GhanaTrotroTransit = () => {
     handleOverlayClick(e, () => setShowSearchHistoryModal(false));
   }, [handleOverlayClick]);
 
+  // Close route-not-found modal when clicking on overlay
+  const handleRouteNotFoundModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowRouteNotFoundModal(false));
+  }, [handleOverlayClick]);
+
   // Check user on component mount
   const checkUser = useCallback(async () => {
     try {
@@ -610,10 +622,15 @@ const GhanaTrotroTransit = () => {
     }
   }, []);
 
-  // Save search history
+  // Save search history — Supabase for signed-in users, an on-device
+  // cookie for guests so they still get a "recent searches" list.
   const saveSearchHistory = useCallback(async (start, dest) => {
-    if (!user) return;
-    
+    if (!user) {
+      const updated = addSearchToCookie(start, dest);
+      setSearchHistory(updated);
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('search_history')
@@ -629,9 +646,12 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Clear all search history for the current user
+  // Clear all search history for the current user (or guest cookie)
   const clearSearchHistory = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setSearchHistory(clearSearchHistoryCookie());
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -650,9 +670,12 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Delete a single search history item
+  // Delete a single search history item (Supabase row or cookie entry)
   const deleteSearchHistoryItem = useCallback(async (itemId) => {
-    if (!user) return;
+    if (!user) {
+      setSearchHistory(deleteSearchFromCookie(itemId));
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -1133,12 +1156,6 @@ const GhanaTrotroTransit = () => {
 
   // Update the findRoutes function
   const findRoutes = useCallback(async () => {
-    if (!user) {
-      alert('Authentication Required: Please sign in to search for routes');
-      setShowProfileModal(true);
-      return;
-    }
-
     if (!startPoint || !destination) {
       alert('Error: Please enter both start and destination points');
       return;
@@ -1175,7 +1192,7 @@ const GhanaTrotroTransit = () => {
       console.log('Fetched routes from database:', routesData);
 
       if (!routesData || routesData.length === 0) {
-        alert('No routes found in database');
+        setShowRouteNotFoundModal(true);
         return;
       }
 
@@ -1201,7 +1218,7 @@ const GhanaTrotroTransit = () => {
       console.log('Matching routes found:', matchingRoutes.length);
 
       if (matchingRoutes.length === 0) {
-        alert(`No direct routes found from ${startPoint} to ${destination}. Try different stops.`);
+        setShowRouteNotFoundModal(true);
         return;
       }
 
@@ -1409,7 +1426,7 @@ const GhanaTrotroTransit = () => {
   }, [showSwipeIndicator]);
 
   // Check if any modal or bottom sheet is open
-  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal;
+  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showRouteNotFoundModal;
 
   // Effects
   useEffect(() => {
@@ -1433,7 +1450,7 @@ const GhanaTrotroTransit = () => {
       } else {
         setUserProfile(null);
         setCreatedRoutesHistory([]);
-        setSearchHistory([]);
+        setSearchHistory(getSearchHistoryFromCookie());
         // Stop realtime subscriptions on sign out
         stopRealtimeSubscriptions();
       }
@@ -1546,23 +1563,6 @@ const GhanaTrotroTransit = () => {
           </div>
         </div>
         
-        {!user && (
-          <div className="auth-banner">
-            <div className="auth-banner-content">
-              <Lock size={16} color="#FFFFFF" />
-              <span className="auth-banner-text">
-                Sign in to search for routes
-              </span>
-            </div>
-            <button 
-              className="auth-banner-button"
-              onClick={() => setShowProfileModal(true)}
-            >
-              Sign In
-            </button>
-          </div>
-        )}
-
         {user && showWelcomeBanner && (
           <div className="welcome-banner">
             <span className="welcome-text">
@@ -1586,17 +1586,10 @@ const GhanaTrotroTransit = () => {
                 onChange={(e) => {
                   setStartPoint(e.target.value);
                   setActiveInput('start');
-                  if (user) {
-                    ensureConnected();
-                    fetchSuggestions(e.target.value, 'start');
-                  }
+                  ensureConnected();
+                  fetchSuggestions(e.target.value, 'start');
                 }}
                 onFocus={() => {
-                  if (!user) {
-                    alert('Authentication Required: Please sign in to search for routes');
-                    setShowProfileModal(true);
-                    return;
-                  }
                   setActiveInput('start');
                   ensureConnected();
                 }}
@@ -1628,17 +1621,10 @@ const GhanaTrotroTransit = () => {
                 onChange={(e) => {
                   setDestination(e.target.value);
                   setActiveInput('destination');
-                  if (user) {
-                    ensureConnected();
-                    fetchSuggestions(e.target.value, 'destination');
-                  }
+                  ensureConnected();
+                  fetchSuggestions(e.target.value, 'destination');
                 }}
                 onFocus={() => {
-                  if (!user) {
-                    alert('Authentication Required: Please sign in to search for routes');
-                    setShowProfileModal(true);
-                    return;
-                  }
                   setActiveInput('destination');
                   ensureConnected();
                 }}
@@ -1674,34 +1660,25 @@ const GhanaTrotroTransit = () => {
           )}
 
           <button 
-            className={`search-button ${!user ? 'search-button-disabled' : ''} ${isFindingRoutes ? 'search-button-loading' : ''}`} 
+            className={`search-button ${isFindingRoutes ? 'search-button-loading' : ''}`} 
             onClick={findRoutes}
-            disabled={!user || isFindingRoutes}
+            disabled={isFindingRoutes}
           >
-            {!user ? (
+            {isFindingRoutes ? (
               <>
-                <Lock size={20} color="#FFFFFF" />
-                <span className="search-button-text">Sign In to Search</span>
+                <RefreshCw size={20} color="#FFFFFF" />
+                <span className="search-button-text">Finding routes...</span>
               </>
             ) : (
               <>
-                {isFindingRoutes ? (
-                  <>
-                    <RefreshCw size={20} color="#FFFFFF" />
-                    <span className="search-button-text">Finding routes...</span>
-                  </>
-                ) : (
-                  <>
-                    <Search size={20} color="#FFFFFF" />
-                    <span className="search-button-text">Find Routes</span>
-                  </>
-                )}
+                <Search size={20} color="#FFFFFF" />
+                <span className="search-button-text">Find Routes</span>
               </>
             )}
           </button>
         </div>
 
-        {user && searchHistory.length > 0 && (
+        {searchHistory.length > 0 && (
           <div className="recent-searches">
             <button
               className="recent-searches-header"
@@ -1758,6 +1735,14 @@ const GhanaTrotroTransit = () => {
               onClick={() => setShowProfileModal(true)}
             >
               Sign Up Free
+            </button>
+            <button
+              className="quick-auth-info-button"
+              onClick={() => setShowInfoModal(true)}
+              title="Why create an account?"
+              aria-label="Why create an account?"
+            >
+              <Info size={16} color={COLORS.primary} />
             </button>
           </div>
         )}
@@ -2478,8 +2463,60 @@ const GhanaTrotroTransit = () => {
                 <h3 className="info-section-title">How It Works</h3>
                 <p className="info-text">
                   Ghana Trotro Transit helps you navigate Accra's public transportation system by finding the best trotro routes between locations.
+                  Don't know your routes? <a href='https://gtt.nxnx.tech/routes-you-can-find.html' target='_blank' rel='noreferrer'>click here</a>
                 </p>
+                
               </div>
+
+              {!user && (
+                <div className="info-section account-perks-section">
+                  <h3 className="info-section-title">Why Create an Account?</h3>
+                  <p className="info-text">
+                    You can already search for routes, but signing up unlocks a lot more:
+                  </p>
+                  <div className="feature-list">
+                    <div className="feature-item">
+                      <div className="feature-icon">
+                        <History size={16} color={COLORS.primary} />
+                      </div>
+                      <span className="feature-text">Search history synced across all your devices</span>
+                    </div>
+                    <div className="feature-item">
+                      <div className="feature-icon">
+                        <Plus size={16} color={COLORS.primary} />
+                      </div>
+                      <span className="feature-text">Create and save your own custom routes</span>
+                    </div>
+                    <div className="feature-item">
+                      <div className="feature-icon">
+                        <Share2 size={16} color={COLORS.primary} />
+                      </div>
+                      <span className="feature-text">Share your custom routes with others</span>
+                    </div>
+                    <div className="feature-item">
+                      <div className="feature-icon">
+                        <Radio size={16} color={COLORS.primary} />
+                      </div>
+                      <span className="feature-text">Real-time route updates and notifications</span>
+                    </div>
+                    <div className="feature-item">
+                      <div className="feature-icon">
+                        <Flag size={16} color={COLORS.primary} />
+                      </div>
+                      <span className="feature-text">Report route issues and track their status</span>
+                    </div>
+                  </div>
+                  <button
+                    className="account-perks-cta-button"
+                    onClick={() => {
+                      setShowInfoModal(false);
+                      setShowProfileModal(true);
+                    }}
+                  >
+                    Create Free Account
+                  </button>
+                </div>
+              )}
 
               <div className="info-section">
                 <h3 className="info-section-title">Features</h3>
@@ -2522,11 +2559,15 @@ const GhanaTrotroTransit = () => {
                 <div className="contact-list">
                   <div className="contact-item">
                     <Phone size={16} color={COLORS.primary} />
-                    <span className="contact-text">+233 209 156 811</span>
+                    <span className="contact-text">
+                      <a className='contact-text-help' href='tel:233209156811'>+233 209 156 811</a>
+                    </span>
                   </div>
                   <div className="contact-item">
                     <Mail size={16} color={COLORS.primary} />
-                    <span className="contact-text">nxnxtech@gmail.com</span>
+                    <span className="contact-text">
+                      <a className='contact-text-help' href='mailto:nxnxtech@gmail.com'>nxnxtech@gmail.com</a>
+                    </span>
                   </div>
                   <div className="contact-item">
                     <Globe size={16} color={COLORS.primary} />
@@ -2677,6 +2718,54 @@ const GhanaTrotroTransit = () => {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Route Not Found Modal ── */}
+      {showRouteNotFoundModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={handleRouteNotFoundModalOverlayClick}
+        >
+          <div className="modal route-not-found-modal">
+            <div className="modal-header">
+              <button
+                className="close-button"
+                onClick={() => setShowRouteNotFoundModal(false)}
+              >
+                <X size={24} color={COLORS.text} />
+              </button>
+            </div>
+
+            <div className="route-not-found-content">
+              <div className="route-not-found-icon">
+                <AlertCircle size={32} color="#F59E0B" />
+              </div>
+              <h3 className="route-not-found-title">Route Not Available Yet</h3>
+              <p className="route-not-found-msg">
+                We couldn&apos;t find a route from <strong>{startPoint}</strong> to <strong>{destination}</strong>.
+                This route may not be available in our database yet.
+              </p>
+              <p className="route-not-found-msg">
+                Visit the link below to see all the routes we currently support.
+              </p>
+              <a
+                href="https://gtt.nxnx.tech/routes-you-can-find.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="route-not-found-link-button"
+              >
+                <Globe size={18} color="#FFFFFF" />
+                <span>See Available Routes</span>
+              </a>
+              <button
+                className="route-not-found-close-button"
+                onClick={() => setShowRouteNotFoundModal(false)}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

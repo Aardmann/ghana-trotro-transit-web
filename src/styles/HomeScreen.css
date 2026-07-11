@@ -816,6 +816,103 @@ body {
   overflow-y: auto;
 }
 
+.quick-auth-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: transparent;
+  cursor: pointer;
+}
+
+.account-perks-section {
+  border-top: 1px solid rgba(0,0,0,0.08);
+  padding-top: 16px;
+  margin-top: 8px;
+}
+
+.account-perks-cta-button {
+  margin-top: 12px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary-light);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.route-not-found-modal {
+  max-width: 380px;
+  text-align: center;
+}
+
+.route-not-found-modal .modal-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.route-not-found-content {
+  padding: 8px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.route-not-found-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.route-not-found-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.route-not-found-msg {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--color-text-light, #6B7280);
+  line-height: 1.5;
+}
+
+.route-not-found-link-button {
+  margin-top: 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius:20px;
+  background: var(--primary-light);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.route-not-found-close-button {
+  margin-top: 10px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .suggestion-item {
   padding: 12px;
   border-bottom: 1px solid #f0f0f0;
