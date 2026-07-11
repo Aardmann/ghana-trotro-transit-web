@@ -792,7 +792,7 @@ body {
 
 .ios-list-group {
   background: #FFFFFF;
-  border-radius: 20px;
+  border-radius: 14px;
   margin-bottom: 20px;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -808,7 +808,6 @@ body {
   cursor: pointer;
   text-align: left;
   transition: background-color 0.15s ease;
-  border-radius: 32px;
 }
 
 .ios-list-row:active {
@@ -824,7 +823,7 @@ body {
 .ios-row-icon {
   width: 28px;
   height: 28px;
-  border-radius: 20px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1594,6 +1593,17 @@ body {
   gap: 12px;
 }
 
+.feature-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #EFF6FF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .feature-text {
   font-size: 14px;
   color: var(--text-color);
@@ -1772,7 +1782,7 @@ body {
 .feature-icon {
   width: 32px;
   height: 32px;
-  border-radius: 20px;
+  border-radius: 8px;
   background: #EFF6FF;
   display: flex;
   align-items: center;
@@ -4779,9 +4789,238 @@ body, #root {
 .auth-input-container,
 .input-container,
 .forgot-password-panel .auth-input-container {
-  border-radius: 30px;
+  border-radius: 18px;
 }
 
 .report-textarea {
   border-radius: 18px;
+}
+
+/* ══════════════════════════════════════════════════════
+   iOS-style Sign In / Create Account form
+   ══════════════════════════════════════════════════════ */
+.ios-auth-form {
+  width: 100%;
+  padding-bottom: 4px;
+}
+
+.ios-auth-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 4px 8px 20px;
+}
+
+.ios-auth-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8B5CF6, #6b21a8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 12px rgba(107, 33, 168, 0.28);
+}
+
+.ios-auth-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: #1C1C1E;
+  letter-spacing: -0.2px;
+  margin: 0 0 4px;
+}
+
+.ios-auth-subtitle {
+  font-size: 14px;
+  color: #8E8E93;
+  margin: 0;
+}
+
+/* Segmented Sign In / Sign Up tabs */
+.ios-auth-tabs {
+  display: flex;
+  background: #E5E5EA;
+  border-radius: 999px;
+  padding: 3px;
+  margin-bottom: 18px;
+  gap: 2px;
+}
+
+.ios-auth-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 9px 0;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6B7280;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ios-auth-tab--active {
+  background: #FFFFFF;
+  color: #1C1C1E;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+/* Grouped input rows (reuses .ios-list-group / .ios-form-group card) */
+.ios-auth-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.ios-auth-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  color: #1C1C1E;
+  min-width: 0;
+}
+
+.ios-auth-input::placeholder {
+  color: #AEAEB2;
+}
+
+.ios-auth-submit {
+  width: 100%;
+  padding: 14px;
+  border-radius: 999px;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  margin: 8px 0 6px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.ios-auth-submit:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.ios-auth-submit:active {
+  transform: translateY(0);
+}
+
+.ios-auth-submit--disabled,
+.ios-auth-submit:disabled {
+  background: #C7C7CC;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ios-auth-forgot {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  width: 100%;
+  padding: 6px 0 2px;
+}
+
+.ios-auth-forgot:hover {
+  opacity: 0.75;
+}
+
+/* Forgot password panel */
+.ios-forgot-panel {
+  margin-top: 12px;
+  animation: fp-panel-in 0.22s ease;
+}
+
+.ios-forgot-body {
+  padding: 14px;
+}
+
+.ios-forgot-label {
+  font-size: 13px;
+  color: #8E8E93;
+  margin: 0 0 10px;
+}
+
+.ios-forgot-input-row {
+  background: #F2F2F7;
+  border-radius: 14px;
+  padding: 11px 14px;
+}
+
+.ios-forgot-send-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 999px;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.ios-forgot-send-btn:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.ios-forgot-send-btn--disabled {
+  background: #C7C7CC;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ios-forgot-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 20px 16px;
+}
+
+.ios-forgot-success-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ios-forgot-success-text {
+  font-size: 13px;
+  color: #1C1C1E;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ios-forgot-done-btn {
+  background: #10B981;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.ios-forgot-done-btn:hover {
+  background: #0DA271;
 }

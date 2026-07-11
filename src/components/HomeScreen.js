@@ -84,21 +84,43 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
   };
 
   return (
-    <div className="auth-form">
-      <h2 className="auth-title">
-        {isSignUp ? 'Create Account' : 'Sign In'}
-      </h2>
-      
+    <div className="ios-auth-form">
+      <div className="ios-auth-header">
+        <div className="ios-auth-icon">
+          <User size={26} color="#FFFFFF" />
+        </div>
+        <h2 className="ios-auth-title">
+          {isSignUp ? 'Create Account' : 'Welcome Back'}
+        </h2>
+        <p className="ios-auth-subtitle">
+          {isSignUp ? 'Sign up to save routes and sync your history' : 'Sign in to continue'}
+        </p>
+      </div>
+
+      <div className="ios-auth-tabs">
+        <button
+          className={`ios-auth-tab ${!isSignUp ? 'ios-auth-tab--active' : ''}`}
+          onClick={() => { setIsSignUp(false); closeForgotPanel(); }}
+        >
+          Sign In
+        </button>
+        <button
+          className={`ios-auth-tab ${isSignUp ? 'ios-auth-tab--active' : ''}`}
+          onClick={() => { setIsSignUp(true); closeForgotPanel(); }}
+        >
+          Sign Up
+        </button>
+      </div>
+
       {isSignUp && (
-        <div className="auth-name-row">
-          <div className="auth-input-container">
-            <User size={20} color={COLORS.primary} />
+        <div className="ios-list-group ios-form-group">
+          <div className="ios-auth-input-row">
+            <User size={17} color="#8E8E93" />
             <input
-              className="auth-input-field"
+              className="ios-auth-input"
               placeholder="First Name"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              style={{ color: COLORS.textLight }}
             />
             {firstName ? (
               <button className="input-clear-btn" onClick={() => setFirstName('')} tabIndex={-1}>
@@ -106,14 +128,14 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
               </button>
             ) : null}
           </div>
-          <div className="auth-input-container">
-            <User size={20} color={COLORS.primary} />
+          <div className="ios-list-divider" style={{ marginLeft: '41px' }}></div>
+          <div className="ios-auth-input-row">
+            <User size={17} color="#8E8E93" />
             <input
-              className="auth-input-field"
+              className="ios-auth-input"
               placeholder="Last Name"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              style={{ color: COLORS.textLight }}
             />
             {lastName ? (
               <button className="input-clear-btn" onClick={() => setLastName('')} tabIndex={-1}>
@@ -123,72 +145,76 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
           </div>
         </div>
       )}
-      
-      <div className="auth-input-container">
-        <Mail size={20} color={COLORS.primary} />
-        <input
-          className="auth-input-field"
-          placeholder="Email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ color: COLORS.textLight }}
-        />
-        {email ? (
-          <button className="input-clear-btn" onClick={() => setEmail('')} tabIndex={-1}>
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
-      
-      <div className="auth-input-container">
-        <Lock size={20} color={COLORS.primary} />
-        <input
-          className="auth-input-field"
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ color: COLORS.textLight }}
-        />
-        {password ? (
-          <button className="input-clear-btn" onClick={() => setPassword('')} tabIndex={-1}>
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
 
-      {isSignUp && (
-        <div className="auth-input-container">
-          <Lock size={20} color={COLORS.primary} />
+      <div className="ios-list-group ios-form-group">
+        <div className="ios-auth-input-row">
+          <Mail size={17} color="#8E8E93" />
           <input
-            className="auth-input-field"
-            placeholder="Confirm Password"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            style={{ color: COLORS.textLight }}
+            className="ios-auth-input"
+            placeholder="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
           />
-          {confirmPassword ? (
-            <button className="input-clear-btn" onClick={() => setConfirmPassword('')} tabIndex={-1}>
+          {email ? (
+            <button className="input-clear-btn" onClick={() => setEmail('')} tabIndex={-1}>
               <X size={14} />
             </button>
           ) : null}
         </div>
-      )}
-      
+
+        <div className="ios-list-divider" style={{ marginLeft: '41px' }}></div>
+
+        <div className="ios-auth-input-row">
+          <Lock size={17} color="#8E8E93" />
+          <input
+            className="ios-auth-input"
+            placeholder="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          {password ? (
+            <button className="input-clear-btn" onClick={() => setPassword('')} tabIndex={-1}>
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+
+        {isSignUp && (
+          <>
+            <div className="ios-list-divider" style={{ marginLeft: '41px' }}></div>
+            <div className="ios-auth-input-row">
+              <Lock size={17} color="#8E8E93" />
+              <input
+                className="ios-auth-input"
+                placeholder="Confirm Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              {confirmPassword ? (
+                <button className="input-clear-btn" onClick={() => setConfirmPassword('')} tabIndex={-1}>
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
+
       <button 
-        className={`auth-button ${authLoading ? 'auth-button-disabled' : ''}`}
+        className={`ios-auth-submit ${authLoading ? 'ios-auth-submit--disabled' : ''}`}
         onClick={handleSubmit}
         disabled={authLoading}
       >
-        {authLoading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+        {authLoading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
       </button>
 
       {!isSignUp && (
         <>
           <button
-            className="auth-forgot-password"
+            className="ios-auth-forgot"
             onClick={() => {
               setShowForgotPanel(prev => !prev);
               setFpSent(false);
@@ -199,24 +225,26 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
           </button>
 
           {showForgotPanel && (
-            <div className="forgot-password-panel">
+            <div className="ios-list-group ios-forgot-panel">
               {fpSent ? (
-                <div className="forgot-password-success">
-                  <CheckCircle size={32} color="#10B981" />
-                  <p className="forgot-password-success-text">
+                <div className="ios-forgot-success">
+                  <div className="ios-forgot-success-icon">
+                    <CheckCircle size={28} color="#10B981" />
+                  </div>
+                  <p className="ios-forgot-success-text">
                     Reset link sent! Check <strong>{fpEmail}</strong> for the password reset link. It expires in 24 hours.
                   </p>
-                  <button className="forgot-password-done-btn" onClick={closeForgotPanel}>
+                  <button className="ios-forgot-done-btn" onClick={closeForgotPanel}>
                     Done
                   </button>
                 </div>
               ) : (
-                <>
-                  <p className="forgot-password-label">Enter your email to receive a reset link:</p>
-                  <div className="auth-input-container">
-                    <Mail size={20} color={COLORS.primary} />
+                <div className="ios-forgot-body">
+                  <p className="ios-forgot-label">Enter your email to receive a reset link</p>
+                  <div className="ios-auth-input-row ios-forgot-input-row">
+                    <Mail size={17} color="#8E8E93" />
                     <input
-                      className="auth-input-field"
+                      className="ios-auth-input"
                       placeholder="Your email address"
                       type="email"
                       value={fpEmail}
@@ -229,28 +257,18 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
                     ) : null}
                   </div>
                   <button
-                    className={`forgot-password-send-btn${fpLoading ? ' forgot-password-send-btn--disabled' : ''}`}
+                    className={`ios-forgot-send-btn${fpLoading ? ' ios-forgot-send-btn--disabled' : ''}`}
                     onClick={handleForgotPasswordSend}
                     disabled={fpLoading}
                   >
                     {fpLoading ? 'Sending...' : 'Send Reset Email'}
                   </button>
-                </>
+                </div>
               )}
             </div>
           )}
         </>
       )}
-      
-      <button 
-        className="auth-switch"
-        onClick={() => {
-          setIsSignUp(!isSignUp);
-          closeForgotPanel();
-        }}
-      >
-        {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-      </button>
     </div>
   );
 };
@@ -2500,7 +2518,7 @@ const GhanaTrotroTransit = () => {
                           setShowProfileModal(false);
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--purple">
+                        <span className="ios-row-icon ios-row-icon--blue">
                           <History size={16} color="#FFFFFF" />
                         </span>
                         <span className="ios-row-text">Search History</span>
@@ -2612,7 +2630,9 @@ const GhanaTrotroTransit = () => {
                 )}
               </div>
             ) : (
-              <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
+              <div className="modal-content ios-profile-content">
+                <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
+              </div>
             )}
           </div>
         </div>
