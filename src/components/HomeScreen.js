@@ -7,7 +7,7 @@ import {
   ArrowLeft, ArrowRight, Trash2,
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
-  Wind, Type, RefreshCw, Radio, Flag, Check
+  Wind, Type, RefreshCw, Radio, Flag, Check, Coins
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
@@ -2428,6 +2428,18 @@ const GhanaTrotroTransit = () => {
                     </span>
                   </button>
 
+                  <button
+                    className="profile-option report-option"
+                    onClick={() => {
+                      window.open('https://gtt.nxnx.tech/earn', '_blank', 'noopener,noreferrer');
+                    }}
+                  >
+                    <Coins size={20} color="#00d026" />
+                    <span className="profile-option-text" style={{ color: '#00a41ea2' }}>
+                      Become an Earner
+                    </span>
+                  </button>
+
                   <button 
                     className="profile-option sign-out-option"
                     onClick={handleSignOut}
@@ -2435,6 +2447,7 @@ const GhanaTrotroTransit = () => {
                     <span className="sign-out-text">Sign Out</span>
                   </button>
                 </div>
+                <h6 class="info-text">Version: aaya!</h6>
               </div>
             ) : (
               <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
@@ -2534,6 +2547,8 @@ const GhanaTrotroTransit = () => {
                 </div>
               </div>
             </div>
+                <h6 class="info-text">Version: aaya!</h6>
+
           </div>
         </div>
       )}
