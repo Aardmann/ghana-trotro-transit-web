@@ -421,6 +421,18 @@ const GhanaTrotroTransit = () => {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSearchHistoryModal, setShowSearchHistoryModal] = useState(false);
   const [showRouteNotFoundModal, setShowRouteNotFoundModal] = useState(false);
+  const [showSignOutConfirmModal, setShowSignOutConfirmModal] = useState(false);
+  const [signOutLoading, setSignOutLoading] = useState(false);
+  const [showSignOutSuccessModal, setShowSignOutSuccessModal] = useState(false);
+
+  // Profile modal — Account sub-view state
+  const [profileView, setProfileView] = useState('menu'); // 'menu' | 'account'
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [nameUpdateLoading, setNameUpdateLoading] = useState(false);
+  const [nameUpdateSuccess, setNameUpdateSuccess] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   
   // History states
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
@@ -781,11 +793,19 @@ const GhanaTrotroTransit = () => {
     }
   }, []);
 
-  const handleSignOut = useCallback(async () => {
+  // Opens the confirmation modal instead of signing out immediately
+  const handleSignOut = useCallback(() => {
+    setShowSignOutConfirmModal(true);
+  }, []);
+
+  // Called when the user confirms sign out in the modal
+  const confirmSignOut = useCallback(async () => {
+    setShowSignOutConfirmModal(false);
+    setSignOutLoading(true);
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      
+
       setUser(null);
       setUserProfile(null);
       setShowProfileModal(false);
@@ -794,13 +814,89 @@ const GhanaTrotroTransit = () => {
       setSelectedRoute(null);
       setSuggestions([]);
       setShowBottomSheet(false);
-      
+
       // Stop realtime subscriptions on sign out
       stopRealtimeSubscriptions();
-      
-      alert('Success: Signed out successfully!');
+
+      setSignOutLoading(false);
+      setShowSignOutSuccessModal(true);
+    } catch (error) {
+      setSignOutLoading(false);
+      alert('Error: ' + error.message);
+    }
+  }, []);
+
+  // Auto-dismiss the sign-out success modal after a couple of seconds
+  useEffect(() => {
+    if (showSignOutSuccessModal) {
+      const timer = setTimeout(() => setShowSignOutSuccessModal(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [showSignOutSuccessModal]);
+
+  // Reset the Account sub-view whenever the profile modal is closed
+  useEffect(() => {
+    if (!showProfileModal) {
+      setProfileView('menu');
+      setNameUpdateSuccess(false);
+    }
+  }, [showProfileModal]);
+
+  const handleOpenAccountView = useCallback(() => {
+    setEditFirstName(userProfile?.first_name || '');
+    setEditLastName(userProfile?.last_name || '');
+    setNameUpdateSuccess(false);
+    setProfileView('account');
+  }, [userProfile]);
+
+  const handleUpdateName = useCallback(async () => {
+    if (!user) return;
+    if (!editFirstName.trim() || !editLastName.trim()) {
+      alert('Error: Please enter both first and last name');
+      return;
+    }
+    setNameUpdateLoading(true);
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ first_name: editFirstName.trim(), last_name: editLastName.trim() })
+        .eq('id', user.id);
+      if (error) throw error;
+
+      setUserProfile((prev) => prev
+        ? { ...prev, first_name: editFirstName.trim(), last_name: editLastName.trim() }
+        : prev);
+      setNameUpdateSuccess(true);
+      setTimeout(() => setNameUpdateSuccess(false), 2000);
     } catch (error) {
       alert('Error: ' + error.message);
+    } finally {
+      setNameUpdateLoading(false);
+    }
+  }, [user, editFirstName, editLastName]);
+
+  const confirmDeleteAccount = useCallback(async () => {
+    setShowDeleteAccountConfirm(false);
+    setDeleteAccountLoading(true);
+    try {
+      const { error } = await supabase.functions.invoke('delete-user');
+      if (error) throw error;
+
+      setUser(null);
+      setUserProfile(null);
+      setShowProfileModal(false);
+      setShowWelcomeBanner(false);
+      setRoutes([]);
+      setSelectedRoute(null);
+      setSuggestions([]);
+      setShowBottomSheet(false);
+
+      stopRealtimeSubscriptions();
+
+      setDeleteAccountLoading(false);
+    } catch (error) {
+      setDeleteAccountLoading(false);
+      alert('Error deleting account: ' + error.message);
     }
   }, []);
 
@@ -2355,88 +2451,220 @@ const GhanaTrotroTransit = () => {
           className="modal-overlay non-blocking"
           onClick={handleProfileModalOverlayClick}
         >
-          <div className="modal" ref={modalRef}>
-            <div className="modal-header">
+          <div className="modal ios-profile-modal" ref={modalRef}>
+            <div className="ios-modal-grabber"></div>
+            <div className="modal-header ios-profile-header">
               <h2 className="modal-title">Profile</h2>
               <button 
-                className="close-button"
+                className="close-button ios-close-button"
                 onClick={() => setShowProfileModal(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} color="#8E8E93" strokeWidth={2.5} />
               </button>
             </div>
 
             {user ? (
-              <div className="modal-content">
-                <div className="user-info">
-                  <div className="avatar">
-                    <span className="avatar-text">
+              <div className="modal-content ios-profile-content">
+                <div className="ios-user-info">
+                  <div className="ios-avatar">
+                    <span className="ios-avatar-text">
                       {userProfile?.first_name?.[0]}{userProfile?.last_name?.[0] || user.email?.[0]?.toUpperCase()}
                     </span>
                   </div>
-                  <span className="user-name">
+                  <span className="ios-user-name">
                     {userProfile?.first_name} {userProfile?.last_name}
                   </span>
-                  <span className="user-email">{user.email}</span>
+                  <span className="ios-user-email">{user.email}</span>
                 </div>
 
-                <div className="profile-options">
-                  <button 
-                    className="profile-option"
-                    onClick={handlePasswordChange}
-                  >
-                    <Key size={20} color={COLORS.primary} />
-                    <span className="profile-option-text">Change Password</span>
-                  </button>
+                {profileView === 'menu' ? (
+                  <>
+                    <div className="ios-list-group">
+                      <button
+                        className="ios-list-row"
+                        onClick={handleOpenAccountView}
+                      >
+                        <span className="ios-row-icon ios-row-icon--purple">
+                          <User size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Account</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
 
-                  <button 
-                    className="profile-option"
-                    onClick={() => {
-                      setShowSearchHistoryModal(true);
-                      setShowProfileModal(false);
-                    }}
-                  >
-                    <History size={20} color={COLORS.primary} />
-                    <span className="profile-option-text">Search History</span>
-                  </button>
+                      <div className="ios-list-divider"></div>
 
-                  <button
-                    className="profile-option report-option"
-                    onClick={() => {
-                      setShowProfileModal(false);
-                      setIsGeneralReport(true);
-                      setTimeout(() => setShowReportModal(true), 200);
-                    }}
-                  >
-                    <Flag size={20} color="#000000" />
-                    <span className="profile-option-text" style={{ color: '#000000' }}>Report an Issue
-                    </span>
-                  </button>
+                      <button 
+                        className="ios-list-row"
+                        onClick={() => {
+                          setShowSearchHistoryModal(true);
+                          setShowProfileModal(false);
+                        }}
+                      >
+                        <span className="ios-row-icon ios-row-icon--purple">
+                          <History size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Search History</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+                    </div>
 
-                  <button
-                    className="profile-option report-option"
-                    onClick={() => {
-                      window.open('https://gtt.nxnx.tech/earn', '_blank', 'noopener,noreferrer');
-                    }}
-                  >
-                    <Coins size={20} color="#00d026" />
-                    <span className="profile-option-text" style={{ color: '#00a41ea2' }}>
-                      Become an Earner
-                    </span>
-                  </button>
+                    <div className="ios-list-group">
+                      <button
+                        className="ios-list-row"
+                        onClick={() => {
+                          setShowProfileModal(false);
+                          setIsGeneralReport(true);
+                          setTimeout(() => setShowReportModal(true), 200);
+                        }}
+                      >
+                        <span className="ios-row-icon ios-row-icon--gray">
+                          <Flag size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Report an Issue</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
 
-                  <button 
-                    className="profile-option sign-out-option"
-                    onClick={handleSignOut}
-                  >
-                    <span className="sign-out-text">Sign Out</span>
-                  </button>
-                </div>
-                <h6 class="info-text">Version: aaya!</h6>
+                      <div className="ios-list-divider"></div>
+
+                      <button
+                        className="ios-list-row"
+                        onClick={() => {
+                          window.open('https://gtt.nxnx.tech/earn', '_blank', 'noopener,noreferrer');
+                        }}
+                      >
+                        <span className="ios-row-icon ios-row-icon--green">
+                          <Coins size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Become an Earner</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+                    </div>
+
+                    <div className="ios-list-group">
+                      <button 
+                        className="ios-list-row ios-list-row--destructive"
+                        onClick={handleSignOut}
+                      >
+                        <span className="ios-row-text ios-row-text--destructive">Sign Out</span>
+                      </button>
+                    </div>
+
+                    <p className="ios-version-text">Version: aaya!</p>
+                  </>
+                ) : (
+                  <div className="ios-account-view">
+                    <button className="ios-back-row" onClick={() => setProfileView('menu')}>
+                      <ChevronLeft size={18} color={COLORS.primary} />
+                      <span>Back</span>
+                    </button>
+
+                    <p className="ios-section-label">Name</p>
+                    <div className="ios-list-group ios-form-group">
+                      <div className="ios-form-row">
+                        <label className="ios-form-label">First Name</label>
+                        <input
+                          className="ios-form-input"
+                          placeholder="First Name"
+                          value={editFirstName}
+                          onChange={(e) => setEditFirstName(e.target.value)}
+                        />
+                      </div>
+                      <div className="ios-list-divider"></div>
+                      <div className="ios-form-row">
+                        <label className="ios-form-label">Last Name</label>
+                        <input
+                          className="ios-form-input"
+                          placeholder="Last Name"
+                          value={editLastName}
+                          onChange={(e) => setEditLastName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      className={`ios-save-button ${nameUpdateSuccess ? 'ios-save-button--success' : ''}`}
+                      onClick={handleUpdateName}
+                      disabled={nameUpdateLoading}
+                    >
+                      {nameUpdateLoading ? 'Saving...' : nameUpdateSuccess ? 'Saved ✓' : 'Save Changes'}
+                    </button>
+
+                    <p className="ios-section-label">Security</p>
+                    <div className="ios-list-group">
+                      <button className="ios-list-row" onClick={handlePasswordChange}>
+                        <span className="ios-row-icon ios-row-icon--purple">
+                          <Key size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Change Password</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+                    </div>
+
+                    <p className="ios-section-label">Danger Zone</p>
+                    <div className="ios-list-group">
+                      <button
+                        className="ios-list-row ios-list-row--destructive"
+                        onClick={() => setShowDeleteAccountConfirm(true)}
+                      >
+                        <span className="ios-row-text ios-row-text--destructive">Delete Account</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Account Confirmation Modal ── */}
+      {showDeleteAccountConfirm && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDeleteAccountConfirm(false); }}
+        >
+          <div className="modal sign-out-confirm-modal">
+            <div className="modal-header">
+              <button
+                className="close-button"
+                onClick={() => setShowDeleteAccountConfirm(false)}
+              >
+                <X size={24} color={COLORS.text} />
+              </button>
+            </div>
+            <div className="sign-out-confirm-content">
+              <div className="delete-account-warning-icon">
+                <AlertCircle size={32} color="#FF3B30" />
+              </div>
+              <h3 className="sign-out-confirm-title">Delete Account?</h3>
+              <p className="sign-out-confirm-msg">
+                This will permanently delete your account and all associated data,
+                including your search history and saved routes. This action cannot be undone.
+              </p>
+              <button
+                className="delete-account-confirm-button"
+                onClick={confirmDeleteAccount}
+              >
+                Delete My Account
+              </button>
+              <button
+                className="sign-out-cancel-button"
+                onClick={() => setShowDeleteAccountConfirm(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Account Loading Overlay ── */}
+      {deleteAccountLoading && (
+        <div className="loading-overlay sign-out-loading-overlay">
+          <div className="sign-out-loading-content">
+            <div className="loading-spinner"></div>
+            <p className="sign-out-loading-text">Deleting account...</p>
           </div>
         </div>
       )}
@@ -2651,72 +2879,84 @@ const GhanaTrotroTransit = () => {
           className="modal-overlay non-blocking"
           onClick={handleSearchHistoryModalOverlayClick}
         >
-          <div className="modal" ref={modalRef}>
-            <div className="modal-header">
+          <div className="modal ios-history-modal" ref={modalRef}>
+            <div className="ios-modal-grabber"></div>
+            <div className="modal-header ios-history-header">
               <h2 className="modal-title">Search History</h2>
-              {searchHistory.length > 0 && (
-                <button
-                  className="clear-history-button clear-history-button--red"
-                  onClick={clearSearchHistory}
-                >
-                  <Trash2 size={14} />
-                  Clear All
-                </button>
-              )}
               <button 
                 className="close-button"
                 onClick={() => setShowSearchHistoryModal(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} color="#8E8E93" strokeWidth={2.5} />
               </button>
             </div>
 
-            <div className="modal-content">
+            <div className="modal-content ios-history-content">
               {searchHistory.length === 0 ? (
-                <div className="empty-state">
-                  <History size={48} color={COLORS.textLight} />
-                  <h3 className="empty-state-title">No Search History</h3>
-                  <p className="empty-state-text">
+                <div className="ios-empty-state">
+                  <div className="ios-empty-state-icon">
+                    <History size={26} color="#8E8E93" />
+                  </div>
+                  <h3 className="ios-empty-state-title">No Search History</h3>
+                  <p className="ios-empty-state-text">
                     Your search history will appear here once you start searching for routes.
                   </p>
                 </div>
               ) : (
-                <div className="history-list">
-                  {searchHistory.map((search) => (
-                    <div
-                      key={search.id}
-                      className="history-item"
+                <>
+                  {searchHistory.length > 0 && (
+                    <button
+                      className="ios-clear-history-button"
+                      onClick={clearSearchHistory}
                     >
-                      <button
-                        className="history-item-content"
-                        onClick={() => {
-                          setStartPoint(search.start_point);
-                          setDestination(search.destination);
-                          setShowSearchHistoryModal(false);
-                          setBottomSheetContent('search');
-                          setShowBottomSheet(true);
-                        }}
-                      >
-                        <span className="history-route-name">
-                          {search.start_point} → {search.destination}
-                        </span>
-                        <span className="history-date">
-                          {new Date(search.searched_at).toLocaleDateString()}
-                        </span>
-                      </button>
-                      <button
-                        className="history-delete-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSearchHistoryItem(search.id);
-                        }}
-                        title="Delete this entry"
-                      >
-                        <X size={16} color={COLORS.textLight} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                      <Trash2 size={14} />
+                      Clear All
+                    </button>
+                  )}
+                  <div className="ios-list-group">
+                    {searchHistory.map((search, idx) => (
+                      <React.Fragment key={search.id}>
+                        <div className="ios-history-row">
+                          <button
+                            className="ios-history-row-main"
+                            onClick={() => {
+                              setStartPoint(search.start_point);
+                              setDestination(search.destination);
+                              setShowSearchHistoryModal(false);
+                              setBottomSheetContent('search');
+                              setShowBottomSheet(true);
+                            }}
+                          >
+                            <span className="ios-row-icon ios-row-icon--blue">
+                              <Navigation size={15} color="#FFFFFF" />
+                            </span>
+                            <span className="ios-history-text">
+                              <span className="ios-history-route">
+                                {search.start_point} → {search.destination}
+                              </span>
+                              <span className="ios-history-date">
+                                {new Date(search.searched_at).toLocaleDateString()}
+                              </span>
+                            </span>
+                          </button>
+                          <button
+                            className="ios-history-delete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteSearchHistoryItem(search.id);
+                            }}
+                            title="Delete this entry"
+                          >
+                            <X size={14} color="#8E8E93" />
+                          </button>
+                        </div>
+                        {idx < searchHistory.length - 1 && (
+                          <div className="ios-list-divider" style={{ marginLeft: '50px' }}></div>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -2763,6 +3003,76 @@ const GhanaTrotroTransit = () => {
               <button
                 className="route-not-found-close-button"
                 onClick={() => setShowRouteNotFoundModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sign Out Confirmation Modal ── */}
+      {showSignOutConfirmModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSignOutConfirmModal(false); }}
+        >
+          <div className="modal sign-out-confirm-modal">
+            <div className="modal-header">
+              <button
+                className="close-button"
+                onClick={() => setShowSignOutConfirmModal(false)}
+              >
+                <X size={24} color={COLORS.text} />
+              </button>
+            </div>
+            <div className="sign-out-confirm-content">
+              <h3 className="sign-out-confirm-title">Sign Out?</h3>
+              <p className="sign-out-confirm-msg">
+                Are you sure you want to sign out of your account?
+              </p>
+              <button
+                className="sign-out-confirm-button"
+                onClick={confirmSignOut}
+              >
+                Sign Out
+              </button>
+              <button
+                className="sign-out-cancel-button"
+                onClick={() => setShowSignOutConfirmModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sign Out Loading Overlay ── */}
+      {signOutLoading && (
+        <div className="loading-overlay sign-out-loading-overlay">
+          <div className="sign-out-loading-content">
+            <div className="loading-spinner"></div>
+            <p className="sign-out-loading-text">Signing out...</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sign Out Success Modal ── */}
+      {showSignOutSuccessModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSignOutSuccessModal(false); }}
+        >
+          <div className="modal sign-out-success-modal">
+            <div className="sign-out-success-content">
+              <div className="sign-out-success-icon">
+                <CheckCircle size={40} color="#10B981" />
+              </div>
+              <h3 className="sign-out-success-title">Signed out successfully</h3>
+              <button
+                className="sign-out-success-button"
+                onClick={() => setShowSignOutSuccessModal(false)}
               >
                 Close
               </button>

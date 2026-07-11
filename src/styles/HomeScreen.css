@@ -694,6 +694,429 @@ body {
   text-align: center;
 }
 
+/* ══════════════════════════════════════════════════════
+   iOS-style Profile Modal
+   ══════════════════════════════════════════════════════ */
+.ios-profile-modal {
+  max-width: 420px;
+  max-height: 85vh;
+  padding: 0 0 24px;
+  background: #F2F2F7;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ios-modal-grabber {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: #D1D1D6;
+  margin: 10px auto 4px;
+}
+
+.ios-profile-header {
+  padding: 6px 16px 12px;
+  margin-bottom: 0;
+  position: relative;
+  background: #F2F2F7;
+}
+
+.ios-profile-header .modal-title {
+  width: 100%;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.ios-close-button {
+  position: absolute;
+  right: 14px;
+  top: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #E5E5EA;
+  padding: 0;
+}
+
+.ios-close-button:hover {
+  background: #DCDCE1;
+}
+
+.ios-profile-content {
+  padding: 4px 16px 0;
+}
+
+.ios-user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px 24px;
+}
+
+.ios-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8B5CF6, #6b21a8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+  box-shadow: 0 4px 12px rgba(107, 33, 168, 0.28);
+}
+
+.ios-avatar-text {
+  color: #FFFFFF;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.ios-user-name {
+  font-size: 19px;
+  font-weight: 700;
+  color: #1C1C1E;
+  letter-spacing: -0.2px;
+  margin-bottom: 2px;
+  text-align: center;
+}
+
+.ios-user-email {
+  font-size: 14px;
+  color: #8E8E93;
+  text-align: center;
+}
+
+.ios-list-group {
+  background: #FFFFFF;
+  border-radius: 20px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.ios-list-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+  border-radius: 32px;
+}
+
+.ios-list-row:active {
+  background: #F2F2F7;
+}
+
+.ios-list-divider {
+  height: 1px;
+  background: #E5E5EA;
+  margin-left: 50px;
+}
+
+.ios-row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.ios-row-icon--purple { background: #6b21a8; }
+.ios-row-icon--blue   { background: #007AFF; }
+.ios-row-icon--gray   { background: #8E8E93; }
+.ios-row-icon--green  { background: #34C759; }
+
+.ios-row-text {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 400;
+  color: #1C1C1E;
+}
+
+.ios-row-chevron {
+  flex-shrink: 0;
+}
+
+.ios-list-row--destructive {
+  justify-content: center;
+  padding: 12px 14px;
+}
+
+.ios-row-text--destructive {
+  flex: none;
+  color: #FF3B30;
+  font-weight: 500;
+  text-align: center;
+}
+
+.ios-version-text {
+  text-align: center;
+  font-size: 12px;
+  color: #AEAEB2;
+  margin: 4px 0 0;
+}
+
+/* ── Account sub-view ── */
+.ios-account-view {
+  padding-bottom: 4px;
+}
+
+.ios-back-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 4px 0 14px;
+  cursor: pointer;
+  color: var(--primary-color);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.ios-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8E8E93;
+  margin: 0 0 6px 4px;
+}
+
+.ios-form-group {
+  padding: 2px 0;
+}
+
+.ios-form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  gap: 12px;
+}
+
+.ios-form-label {
+  font-size: 15px;
+  color: #1C1C1E;
+  flex-shrink: 0;
+}
+
+.ios-form-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  text-align: right;
+  font-size: 15px;
+  color: #1C1C1E;
+  min-width: 0;
+}
+
+.ios-form-input::placeholder {
+  color: #C7C7CC;
+}
+
+.ios-save-button {
+  width: 100%;
+  padding: 13px;
+  border-radius: 999px;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  margin: 10px 0 20px;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.ios-save-button:hover {
+  background: var(--primary-dark);
+}
+
+.ios-save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ios-save-button--success {
+  background: #34C759;
+}
+
+.delete-account-warning-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 59, 48, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.delete-account-confirm-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 999px;
+  border: none;
+  background: #FF3B30;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.delete-account-confirm-button:hover {
+  background: #E0342A;
+}
+
+/* ── Search History Modal (iOS style) ── */
+.ios-history-modal {
+  max-width: 460px;
+  padding: 0 0 24px;
+  background: #F2F2F7;
+  overflow-y: auto;
+}
+
+.ios-history-header {
+  padding: 6px 16px 12px;
+  margin-bottom: 0;
+  background: #F2F2F7;
+}
+
+.ios-history-header .modal-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ios-history-content {
+  padding: 4px 16px 0;
+}
+
+.ios-clear-history-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px auto;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: none;
+  background: #FEF2F2;
+  color: #FF3B30;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ios-clear-history-button:hover {
+  background: #FEE2E2;
+}
+
+.ios-history-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.ios-history-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ios-history-row-main:active {
+  background: #F2F2F7;
+}
+
+.ios-history-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ios-history-route {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1C1C1E;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ios-history-date {
+  font-size: 12px;
+  color: #8E8E93;
+}
+
+.ios-history-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ios-history-delete:hover {
+  background: #F2F2F7;
+}
+
+.ios-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.ios-empty-state-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #E5E5EA;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.ios-empty-state-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1C1C1E;
+  margin: 0 0 6px;
+}
+
+.ios-empty-state-text {
+  font-size: 13px;
+  color: #8E8E93;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 260px;
+}
+
 .sign-out-button {
   background-color: var(--error);
   border: none;
@@ -933,6 +1356,125 @@ body {
   color: var(--text-color);
 }
 
+/* ── Sign Out Confirmation Modal ── */
+.sign-out-confirm-modal {
+  max-width: 340px;
+  text-align: center;
+}
+
+.sign-out-confirm-modal .modal-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.sign-out-confirm-content {
+  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sign-out-confirm-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sign-out-confirm-msg {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--color-text-light, #6B7280);
+  line-height: 1.5;
+}
+
+.sign-out-confirm-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 20px;
+  border: none;
+  background: #EF4444;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.sign-out-confirm-button:hover {
+  background: #DC2626;
+}
+
+.sign-out-cancel-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* ── Sign Out Loading Overlay ── */
+.sign-out-loading-overlay {
+  position: fixed;
+  z-index: 2000;
+  background: rgba(255,255,255,0.9);
+}
+
+.sign-out-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.sign-out-loading-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-color, #1E293B);
+  margin: 0;
+}
+
+/* ── Sign Out Success Modal ── */
+.sign-out-success-modal {
+  max-width: 320px;
+  text-align: center;
+}
+
+.sign-out-success-content {
+  padding: 32px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sign-out-success-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.sign-out-success-title {
+  margin: 0 0 20px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sign-out-success-button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 20px;
+  border: none;
+  background: var(--primary-light);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* Loading States */
 .loading-overlay {
   position: absolute;
@@ -1018,53 +1560,6 @@ body {
   margin-bottom: 20px;
 }
 
-/* Profile Options */
-.profile-options {
-  margin-top: 20px;
-  padding: 0 10px;
-}
-
-.profile-option {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 16px;
-  background: #F8FAFC;
-  border: none;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  box-shadow: 0 5px 10px 1px rgba(0, 0, 0, 0.1);
-}
-
-.profile-option:hover {
-  background: #F1F5F9;
-}
-
-.profile-option-text {
-  margin-left: 12px;
-  font-size: 16px;
-  color: var(--text-color);
-  font-weight: 500;
-}
-
-.sign-out-option {
-  background: #FEF2F2;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.sign-out-option:hover {
-  background: #FEE2E2;
-}
-
-.sign-out-text {
-  color: var(--error);
-  font-size: 16px;
-  font-weight: 600;
-}
-
 /* Info Modal Styles */
 .info-modal {
   max-width: 500px;
@@ -1097,17 +1592,6 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.feature-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: #EFF6FF;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 .feature-text {
@@ -1251,51 +1735,6 @@ body {
   z-index: 1;
 }
 
-/* Profile Options */
-.profile-options {
-  margin-top: 20px;
-}
-
-.profile-option {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 16px;
-  background: #F8FAFC;
-  border: none;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.profile-option:hover {
-  background: #F1F5F9;
-}
-
-.profile-option-text {
-  margin-left: 12px;
-  font-size: 16px;
-  color: var(--text-color);
-  font-weight: 500;
-}
-
-.sign-out-option {
-  background: #FEF2F2;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.sign-out-option:hover {
-  background: #FEE2E2;
-}
-
-.sign-out-text {
-  color: var(--error);
-  font-size: 16px;
-  font-weight: 600;
-}
-
 /* Info Modal Styles */
 .info-modal {
   max-width: 500px;
@@ -1333,7 +1772,7 @@ body {
 .feature-icon {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 20px;
   background: #EFF6FF;
   display: flex;
   align-items: center;
@@ -1797,45 +2236,6 @@ body {
 
 .status-indicator.disconnected {
   background: #9ca3af;
-}
-
-/* Profile Options (local duplicate kept tidy) */
-.profile-options { margin-top: 20px; }
-
-.profile-option {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 16px;
-  background: #f8fafc;
-  border: none;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.profile-option:hover { background: #f1f5f9; }
-
-.profile-option-text {
-  margin-left: 12px;
-  font-size: 16px;
-  color: var(--text-color);
-  font-weight: 500;
-}
-
-.sign-out-option {
-  background: #fef2f2;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.sign-out-option:hover { background: #fee2e2; }
-
-.sign-out-text {
-  color: var(--error);
-  font-size: 16px;
-  font-weight: 600;
 }
 
 /* ── Z-index hierarchy ──────────────────────────────── */
@@ -4304,4 +4704,84 @@ body, #root {
 .destination-icon {
   margin-top: 1px;
   margin-left: -1px;
+}
+/* ══════════════════════════════════════════════════════════════════════
+   GLOBAL UI REFRESH — rounded modals, buttons, and input fields
+   (kept last in the stylesheet so it wins the cascade over older rules)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Modal shell ── */
+.modal-overlay {
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.search-modal, .route-modal, .modal {
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.14);
+}
+
+.modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+/* Auto grabber handle for every modal that doesn't already render its own */
+.modal:not(.ios-profile-modal):not(.ios-history-modal)::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: #D1D1D6;
+  margin: 6px auto 10px;
+}
+
+.close-button {
+  background: #E5E5EA;
+  border-radius: 50%;
+  padding: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.close-button:hover {
+  background: #DCDCE1;
+}
+
+/* ── Rounded (pill) action buttons ── */
+.auth-button,
+.auth-switch,
+.forgot-password-send-btn,
+.forgot-password-done-btn,
+.route-not-found-link-button,
+.route-not-found-close-button,
+.sign-out-confirm-button,
+.sign-out-cancel-button,
+.sign-out-success-button,
+.delete-account-confirm-button,
+.report-submit-button,
+.report-done-button,
+.report-inline-button,
+.account-perks-cta-button,
+.new-search-button,
+.quick-auth-button,
+.quick-auth-info-button,
+.search-button,
+.swap-button,
+.store-button,
+.report-chip {
+  border-radius: 999px;
+}
+
+/* ── Rounded input fields ── */
+.auth-input-container,
+.input-container,
+.forgot-password-panel .auth-input-container {
+  border-radius: 30px;
+}
+
+.report-textarea {
+  border-radius: 18px;
 }

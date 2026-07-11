@@ -11,11 +11,19 @@ const MapComponent = React.memo(({
 }) => {
   const iframeRef = useRef(null);
 
-  // Listen for layer-change messages from the iframe
+  // Tracks whether the map inside the iframe has finished loading,
+  // and whether it's taking unusually long (> 3s) so we can reassure the user
+  const [isMapReady, setIsMapReady] = useState(false);
+  const [isMapSlow, setIsMapSlow] = useState(false);
+
+  // Listen for layer-change / map-ready messages from the iframe
   useEffect(() => {
     const handler = (e) => {
       if (e.data?.type === 'MAP_LAYER_CHANGE' && onLayerChange) {
         onLayerChange(e.data.layer);
+      }
+      if (e.data?.type === 'MAP_READY') {
+        setIsMapReady(true);
       }
     };
     window.addEventListener('message', handler);
@@ -178,6 +186,8 @@ map.on('load', function() {
 
   if (allStops.length >= 2) drawRouteWithRoads();
   drawStops();
+
+  try { window.parent.postMessage({ type: 'MAP_READY' }, '*'); } catch(e) {}
 });
 
 // ── Compass — rotates opposite to map bearing ─────────────────────────────────
@@ -441,18 +451,45 @@ function drawStops() {
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     setBlobUrl(url);
+    // A fresh map/iframe is loading — reset the ready/slow flags
+    setIsMapReady(false);
+    setIsMapSlow(false);
     return () => URL.revokeObjectURL(url);
   }, [html]);
 
+  // If the map hasn't reported ready within 3s, let the user know it's still on its way
+  useEffect(() => {
+    if (isMapReady) {
+      setIsMapSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setIsMapSlow(true), 3000);
+    return () => clearTimeout(timer);
+  }, [isMapReady, blobUrl]);
+
   return (
-    <iframe
-      ref={iframeRef}
-      src={blobUrl || 'about:blank'}
-      className="map-container"
-      style={{ border: 'none', width: '100%', height: '100%', display: 'block' }}
-      title="Ghana Trotro Transit Map"
-      allow="geolocation"
-    />
+    <div className="map-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <iframe
+        ref={iframeRef}
+        src={blobUrl || 'about:blank'}
+        className="map-container"
+        style={{ border: 'none', width: '100%', height: '100%', display: 'block' }}
+        title="Ghana Trotro Transit Map"
+        allow="geolocation"
+      />
+      {!isMapReady && (
+        <div className="map-loading-overlay">
+          <div className="map-loading-spinner"></div>
+          <p className="map-loading-text">Loading map...</p>
+          {isMapSlow && (
+            <p className="map-loading-subtext">
+              This is taking longer than usual. Hang tight, it doesn&apos;t normally take this long.
+              <p>You might have a poor internet connection. Check that.</p>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 });
 
