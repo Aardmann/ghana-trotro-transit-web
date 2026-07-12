@@ -7,7 +7,8 @@ import {
   ArrowLeft, ArrowRight, Trash2,
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
-  Wind, Type, RefreshCw, Radio, Flag, Check, Coins
+  Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
+  Eye, EyeOff
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -27,6 +28,8 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Forgot password panel state
   const [showForgotPanel, setShowForgotPanel] = useState(false);
@@ -170,10 +173,18 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
           <input
             className="ios-auth-input"
             placeholder="Password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          <button
+            type="button"
+            className="password-reveal-btn"
+            onClick={() => setShowPassword(prev => !prev)}
+            tabIndex={-1}
+          >
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
           {password ? (
             <button className="input-clear-btn" onClick={() => setPassword('')} tabIndex={-1}>
               <X size={14} />
@@ -189,10 +200,18 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
               <input
                 className="ios-auth-input"
                 placeholder="Confirm Password"
-                type="password"
+                type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
               />
+              <button
+                type="button"
+                className="password-reveal-btn"
+                onClick={() => setShowConfirmPassword(prev => !prev)}
+                tabIndex={-1}
+              >
+                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
               {confirmPassword ? (
                 <button className="input-clear-btn" onClick={() => setConfirmPassword('')} tabIndex={-1}>
                   <X size={14} />
@@ -519,6 +538,8 @@ const GhanaTrotroTransit = () => {
   const [swipeTranslate, setSwipeTranslate] = useState(0);
   const [isSwipeActive, setIsSwipeActive] = useState(false);
   const bottomSheetContentRef = useRef(null);
+  const touchStartYRef = useRef(null);
+  const swipeAxisLockRef = useRef(null); // 'x' | 'y' | null — decided once per gesture
 
   // ── Vertical drag / snap state ──────────────────────────────────────────────
   const SNAP_HEIGHTS = [32, 58, 88]; // vh: peek, half, full
@@ -1398,32 +1419,45 @@ const GhanaTrotroTransit = () => {
 
   const handleTouchStart = (e) => {
     const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY;
     setTouchStart(clientX);
-    setIsSwipeActive(true);
+    touchStartYRef.current = clientY;
+    swipeAxisLockRef.current = null;
+    setIsSwipeActive(false);
     setSwipeTranslate(0);
   };
 
   const handleTouchMove = (e) => {
     if (touchStart === null) return;
-    
+    if (bottomSheetContent !== 'route') return;
+
     const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY;
     const distance = clientX - touchStart;
-    
-    // Only allow swipe when showing route content
-    if (bottomSheetContent === 'route') {
-      // Limit the drag to -100% to 100%
-      const clampedDistance = Math.max(-window.innerWidth, Math.min(window.innerWidth, distance));
-      setSwipeTranslate(clampedDistance);
+    const distanceY = touchStartYRef.current !== null ? clientY - touchStartYRef.current : 0;
+
+    // Decide the gesture's axis once, early on, and stick with it — this is
+    // what stops a vertical scroll from ever nudging the sheet sideways.
+    if (swipeAxisLockRef.current === null) {
+      if (Math.abs(distance) < 8 && Math.abs(distanceY) < 8) return; // not enough movement yet
+      swipeAxisLockRef.current = Math.abs(distance) > Math.abs(distanceY) ? 'x' : 'y';
+      if (swipeAxisLockRef.current === 'x') setIsSwipeActive(true);
     }
+
+    if (swipeAxisLockRef.current !== 'x') return; // vertical gesture — leave the sheet alone
+
+    // Limit the drag to -100% to 100%
+    const clampedDistance = Math.max(-window.innerWidth, Math.min(window.innerWidth, distance));
+    setSwipeTranslate(clampedDistance);
   };
 
   const handleTouchEnd = () => {
     if (touchStart === null) return;
-    
+
     const swipeThreshold = window.innerWidth * 0.2; // 20% of screen width
-    
-    // Only respond to swipes when bottom sheet is showing route content
-    if (bottomSheetContent === 'route') {
+
+    // Only resolve into a page change if this gesture was locked to the x-axis
+    if (bottomSheetContent === 'route' && swipeAxisLockRef.current === 'x') {
       if (swipeTranslate < -swipeThreshold && bottomSheetState === 'route-details') {
         // Swiped left - go to route-info
         setPrevBottomSheetState('route-details');
@@ -1443,6 +1477,8 @@ const GhanaTrotroTransit = () => {
     setShowSwipeIndicator(false);
     setIsSwipeActive(false);
     setTouchStart(null);
+    touchStartYRef.current = null;
+    swipeAxisLockRef.current = null;
   };
 
   // Pointer event fallbacks for desktop / trackpad
@@ -1475,16 +1511,15 @@ const GhanaTrotroTransit = () => {
   const handleSheetHandlePointerDown = useCallback((e) => {
     e.stopPropagation();
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
     sheetDragRef.current = {
       ...sheetDragRef.current,
       active: true,
       startY: clientY,
-      startH: snaps[sheetSnapIndex] ?? sheetDragHeight,
-      currentH: snaps[sheetSnapIndex] ?? sheetDragHeight,
+      startH: sheetDragHeight,
+      currentH: sheetDragHeight,
     };
     setSheetIsDragging(true);
-  }, [sheetSnapIndex, sheetDragHeight]);
+  }, [sheetDragHeight]);
 
   useEffect(() => {
     if (!sheetIsDragging) return;
@@ -1493,22 +1528,25 @@ const GhanaTrotroTransit = () => {
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
       const d = sheetDragRef.current;
       const deltaVh = ((d.startY - clientY) / window.innerHeight) * 100;
-      const newH = Math.min(92, Math.max(20, d.startH + deltaVh));
+      // Let the sheet be dragged all the way down so the user can feel it
+      // collapsing toward the dismiss threshold, rather than hard-stopping at 20vh.
+      const newH = Math.min(92, Math.max(4, d.startH + deltaVh));
       d.currentH = newH;
       setSheetDragHeight(newH);
     };
 
     const onUp = () => {
       const h = sheetDragRef.current.currentH;
-      const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
-      let nearest = 0;
-      let minDist = Infinity;
-      snaps.forEach((sh, i) => {
-        const dist = Math.abs(sh - h);
-        if (dist < minDist) { minDist = dist; nearest = i; }
-      });
-      setSheetSnapIndex(nearest);
-      setSheetDragHeight(snaps[nearest]);
+
+      if (h <= 20) {
+        // Dragged down to (or past) the dismiss threshold — close the sheet
+        closeBottomSheet();
+        setSheetIsDragging(false);
+        return;
+      }
+
+      // Otherwise: free snap — the sheet just stays wherever the user left it
+      setSheetDragHeight(h);
       setSheetIsDragging(false);
     };
 
@@ -1522,7 +1560,7 @@ const GhanaTrotroTransit = () => {
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('touchend', onUp);
     };
-  }, [sheetIsDragging]);
+  }, [sheetIsDragging, closeBottomSheet]);
 
   // Reset sheet to mid snap when bottom sheet opens
   useEffect(() => {
@@ -1672,7 +1710,7 @@ const GhanaTrotroTransit = () => {
               className="close-button"
               onClick={closeBottomSheet}
             >
-              <X size={20} color={COLORS.text} />
+              <X size={18} strokeWidth={2.5} />
             </button>
           </div>
         </div>
@@ -1897,7 +1935,7 @@ const GhanaTrotroTransit = () => {
             onClick={closeBottomSheet}
             title="Close"
           >
-            <X size={20} color={COLORS.text} />
+            <X size={18} strokeWidth={2.5} />
           </button>
         </div>
       </div>
@@ -2157,7 +2195,7 @@ const GhanaTrotroTransit = () => {
             onClick={closeBottomSheet}
             title="Close"
           >
-            <X size={20} color={COLORS.text} />
+            <X size={18} strokeWidth={2.5} />
           </button>
         </div>
       </div>
@@ -2474,10 +2512,10 @@ const GhanaTrotroTransit = () => {
             <div className="modal-header ios-profile-header">
               <h2 className="modal-title">Profile</h2>
               <button 
-                className="close-button ios-close-button"
+                className="close-button"
                 onClick={() => setShowProfileModal(false)}
               >
-                <X size={18} color="#8E8E93" strokeWidth={2.5} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -2566,8 +2604,6 @@ const GhanaTrotroTransit = () => {
                         <span className="ios-row-text ios-row-text--destructive">Sign Out</span>
                       </button>
                     </div>
-
-                    <p className="ios-version-text">Version: aaya!</p>
                   </>
                 ) : (
                   <div className="ios-account-view">
@@ -2634,6 +2670,8 @@ const GhanaTrotroTransit = () => {
                 <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
               </div>
             )}
+                    <p className="ios-version-text">Version: aaya!</p>
+
           </div>
         </div>
       )}
@@ -2650,7 +2688,7 @@ const GhanaTrotroTransit = () => {
                 className="close-button"
                 onClick={() => setShowDeleteAccountConfirm(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
             <div className="sign-out-confirm-content">
@@ -2702,7 +2740,7 @@ const GhanaTrotroTransit = () => {
                 className="close-button"
                 onClick={() => setShowInfoModal(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -2852,7 +2890,7 @@ const GhanaTrotroTransit = () => {
             <div className="modal-header">
               <h2 className="modal-title">Download the App</h2>
               <button className="close-button" onClick={() => setShowDownloadAppModal(false)}>
-                <X size={24} color={COLORS.text} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
             <div className="modal-content download-app-content">
@@ -2907,7 +2945,7 @@ const GhanaTrotroTransit = () => {
                 className="close-button"
                 onClick={() => setShowSearchHistoryModal(false)}
               >
-                <X size={18} color="#8E8E93" strokeWidth={2.5} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -2995,7 +3033,7 @@ const GhanaTrotroTransit = () => {
                 className="close-button"
                 onClick={() => setShowRouteNotFoundModal(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
 
@@ -3043,7 +3081,7 @@ const GhanaTrotroTransit = () => {
                 className="close-button"
                 onClick={() => setShowSignOutConfirmModal(false)}
               >
-                <X size={24} color={COLORS.text} />
+                <X size={18} strokeWidth={2.5} />
               </button>
             </div>
             <div className="sign-out-confirm-content">
@@ -3133,7 +3171,7 @@ const GhanaTrotroTransit = () => {
                     </h2>
                   </div>
                   <button className="close-button" onClick={closeReportModal}>
-                    <X size={24} color={COLORS.text} />
+                    <X size={18} strokeWidth={2.5} />
                   </button>
                 </div>
 

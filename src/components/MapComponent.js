@@ -136,7 +136,7 @@ var mapReady        = false;
 var routeBounds     = null;
 var stopMarkers     = [];
 var lastRoadGeoJSON = null;
-var lastWalkGeoJSON = null;
+var lastWalkArcGeoJSON = null;
 
 // ── Data from React ──────────────────────────────────────────────────────────
 var allStops    = ${stopsJSON};
@@ -245,7 +245,7 @@ function toggleLayer() {
 // Re-add route lines and stop markers after a style change
 // (sources/layers are lost when the style is swapped)
 function redrawAfterStyleChange() {
-  if (lastRoadGeoJSON) addRouteLayer(lastRoadGeoJSON, lastWalkGeoJSON);
+  if (lastRoadGeoJSON) addRouteLayer(lastRoadGeoJSON, lastWalkArcGeoJSON);
   drawStops();
 }
 
@@ -290,26 +290,29 @@ function drawRouteWithRoads() {
       if (r.group.type === 'road' && r.coords.length > 0) roadLines.push(r.coords);
     });
 
-    var walkLines = [];
+    var walkArcFeatures = [];
     groups.forEach(function(g) {
       if (g.type !== 'walk') return;
       var from = allStops[g.indices[0]];
       var to   = allStops[g.indices[1]];
       if (from.fare_to_next !== 0) return;
-      var arc = buildArc([from.lat, from.lng], [to.lat, to.lng], 40);
-      walkLines.push(arc.map(function(p) { return [p[1], p[0]]; }));
+      // The walk arc is a real 3-D extruded dash trail with true elevation,
+      // so it reads as going over-and-above from every bearing/pitch angle
+      walkArcFeatures = walkArcFeatures.concat(
+        buildWalkArcPolygons([from.lat, from.lng], [to.lat, to.lng], 40)
+      );
     });
 
     var roadGeoJSON = roadLines.length > 0
       ? { type:'Feature', geometry:{ type:'MultiLineString', coordinates:roadLines } }
       : null;
-    var walkGeoJSON = walkLines.length > 0
-      ? { type:'Feature', geometry:{ type:'MultiLineString', coordinates:walkLines } }
+    var walkArcGeoJSON = walkArcFeatures.length > 0
+      ? { type:'FeatureCollection', features:walkArcFeatures }
       : null;
 
     lastRoadGeoJSON = roadGeoJSON;
-    lastWalkGeoJSON = walkGeoJSON;
-    addRouteLayer(roadGeoJSON, walkGeoJSON);
+    lastWalkArcGeoJSON = walkArcGeoJSON;
+    addRouteLayer(roadGeoJSON, walkArcGeoJSON);
 
     var allCoords = allStops.map(function(s) { return [s.lng, s.lat]; });
     roadLines.forEach(function(line) { line.forEach(function(c) { allCoords.push(c); }); });
@@ -324,9 +327,9 @@ function drawRouteWithRoads() {
   });
 }
 
-function addRouteLayer(roadGeoJSON, walkGeoJSON) {
-  ['route-line','walk-line'].forEach(function(id) { if (map.getLayer(id))  map.removeLayer(id); });
-  ['route-src', 'walk-src' ].forEach(function(id) { if (map.getSource(id)) map.removeSource(id); });
+function addRouteLayer(roadGeoJSON, walkArcGeoJSON) {
+  ['route-line', 'walk-arc-layer'].forEach(function(id) { if (map.getLayer(id))  map.removeLayer(id); });
+  ['route-src',  'walk-arc-src' ].forEach(function(id) { if (map.getSource(id)) map.removeSource(id); });
 
   if (roadGeoJSON) {
     map.addSource('route-src', { type:'geojson', data:roadGeoJSON });
@@ -337,31 +340,113 @@ function addRouteLayer(roadGeoJSON, walkGeoJSON) {
     });
   }
 
-  if (walkGeoJSON) {
-    map.addSource('walk-src', { type:'geojson', data:walkGeoJSON });
+  // The real 3-D arc: a trail of small extruded dashes with true elevation
+  // (base/height in metres), so its "over-and-above" shape is a genuine 3-D
+  // object rather than a lat/lng offset — it reads correctly from any
+  // bearing or pitch, with no flat line underneath it.
+  if (walkArcGeoJSON) {
+    map.addSource('walk-arc-src', { type:'geojson', data:walkArcGeoJSON });
     map.addLayer({
-      id:'walk-line', type:'line', source:'walk-src',
-      layout:{ 'line-join':'round', 'line-cap':'round' },
-      paint:{ 'line-color':'#10B981', 'line-width':5, 'line-opacity':0.9, 'line-dasharray':[2,2] }
+      id:'walk-arc-layer', type:'fill-extrusion', source:'walk-arc-src',
+      paint:{
+        'fill-extrusion-color':'#10B981',
+        'fill-extrusion-base':['get', 'base'],
+        'fill-extrusion-height':['get', 'height'],
+        'fill-extrusion-opacity':0.9
+      }
     });
   }
 }
 
-// Quadratic Bézier arc between two lat/lng points
-function buildArc(from, to, n) {
-  var mLat = (from[0] + to[0]) / 2;
-  var mLng = (from[1] + to[1]) / 2;
-  var d    = Math.sqrt(Math.pow(to[0] - from[0], 2) + Math.pow(to[1] - from[1], 2));
-  var h    = Math.max(d * 0.2, 0.001);
-  var pts  = [];
-  for (var i = 0; i <= n; i++) {
-    var t = i / n, t1 = 1 - t;
-    pts.push([
-      t1 * t1 * from[0] + 2 * t1 * t * (mLat + h) + t * t * to[0],
-      t1 * t1 * from[1] + 2 * t1 * t *  mLng       + t * t * to[1]
-    ]);
+// Great-circle-ish straight-line distance in metres between two lat/lng points
+function haversineMeters(a, b) {
+  var R = 6371000, toRad = Math.PI / 180;
+  var dLat = (b[0] - a[0]) * toRad;
+  var dLng = (b[1] - a[1]) * toRad;
+  var la1 = a[0] * toRad, la2 = b[0] * toRad;
+  var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Builds a trail of small, separated extruded dash-blocks that step up and
+// back down between "from" and "to", tracing a parabolic height profile.
+// Because each dash's elevation is real 3-D (fill-extrusion-base/height in
+// metres) rather than a horizontal lat/lng offset, the dashed arc keeps its
+// "over-and-above" silhouette no matter how the map is rotated or pitched.
+function buildWalkArcPolygons(from, to, n) {
+  var distM   = haversineMeters(from, to);
+  var maxH    = Math.min(Math.max(distM * 0.25, 12), 60); // clamp: 12–60 m peak
+  var widthM  = 4.5;    // dash width, metres (a little bigger than before)
+  var dashFrac = 0.45;  // fraction of each step that is solid dash (rest is gap)
+  var latM    = 111320;
+  var lngM    = 111320 * Math.cos(((from[0] + to[0]) / 2) * Math.PI / 180);
+
+  function pointAt(t) {
+    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
   }
-  return pts;
+  function heightAt(t) {
+    return maxH * Math.sin(Math.PI * t);
+  }
+
+  // Builds a rounded "capsule" (stadium-shaped) footprint between p1 and p2 —
+  // a rectangle with semicircular caps on both ends — so each dash reads as a
+  // soft rounded pill rather than a sharp-cornered block.
+  function buildCapsulePolygon(p1, p2, r) {
+    var dxM = (p2[1] - p1[1]) * lngM;
+    var dyM = (p2[0] - p1[0]) * latM;
+    var len = Math.sqrt(dxM * dxM + dyM * dyM) || 0.0001;
+    var dirX = dxM / len, dirY = dyM / len;
+    var perpX = -dirY, perpY = dirX;
+    var steps = 8;
+
+    function toLngLat(anchor, offXm, offYm) {
+      return [anchor[1] + offXm / lngM, anchor[0] + offYm / latM];
+    }
+
+    var pts = [];
+    pts.push(toLngLat(p1, perpX * r, perpY * r));
+    pts.push(toLngLat(p2, perpX * r, perpY * r));
+    // Round cap around p2, sweeping outward (away from p1)
+    for (var k = 1; k < steps; k++) {
+      var ang = (k / steps) * Math.PI;
+      var ox = perpX * Math.cos(ang) + dirX * Math.sin(ang);
+      var oy = perpY * Math.cos(ang) + dirY * Math.sin(ang);
+      pts.push(toLngLat(p2, ox * r, oy * r));
+    }
+    pts.push(toLngLat(p2, -perpX * r, -perpY * r));
+    pts.push(toLngLat(p1, -perpX * r, -perpY * r));
+    // Round cap around p1, sweeping outward (away from p2)
+    for (var k2 = 1; k2 < steps; k2++) {
+      var ang2 = (k2 / steps) * Math.PI;
+      var ox2 = -perpX * Math.cos(ang2) - dirX * Math.sin(ang2);
+      var oy2 = -perpY * Math.cos(ang2) - dirY * Math.sin(ang2);
+      pts.push(toLngLat(p1, ox2 * r, oy2 * r));
+    }
+    pts.push(toLngLat(p1, perpX * r, perpY * r)); // close the ring
+    return pts;
+  }
+
+  var features = [];
+  for (var j = 0; j < n; j++) {
+    var t0 = j / n;
+    var t1 = t0 + (1 / n) * dashFrac; // dash occupies only part of the step, leaving a gap
+
+    var p1 = pointAt(t0), p2 = pointAt(t1);
+    var ring = buildCapsulePolygon(p1, p2, widthM / 2);
+
+    var h1 = heightAt(t0), h2 = heightAt(t1);
+    var base = Math.min(h1, h2);
+    var top  = Math.max(h1, h2);
+    if (top - base < 2) top = base + 2; // keep even near-flat dashes visibly 3-D
+
+    features.push({
+      type:'Feature',
+      properties:{ base:base, height:top },
+      geometry:{ type:'Polygon', coordinates:[ring] }
+    });
+  }
+  return features;
 }
 
 // ── Stop markers ──────────────────────────────────────────────────────────────

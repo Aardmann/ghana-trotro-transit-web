@@ -224,21 +224,11 @@ body {
   gap: 10px;
 }
 
-.close-button {
-  background: none;
-  border: none;
-  padding: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .clear-history-button {
   background: none;
   border: 1px solid var(--primary-color);
   color: var(--primary-color);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 8px 12px;
   font-size: 14px;
   font-weight: 600;
@@ -292,7 +282,7 @@ body {
   display: flex;
   align-items: center;
   background-color: #F3F4F6;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 12px 15px;
   margin-bottom: 12px;
   border: 1.5px solid transparent;
@@ -340,10 +330,31 @@ body {
   color: var(--text-color);
 }
 
+/* Eye / reveal-password toggle inside password inputs */
+.password-reveal-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  margin-right: 2px;
+  cursor: pointer;
+  color: #8E8E93;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.password-reveal-btn:hover {
+  background-color: #e5e7eb;
+  color: var(--text-color);
+}
+
 .auth-button {
   background-color: var(--primary-color);
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 14px;
   color: white;
   font-size: 15px;
@@ -400,7 +411,7 @@ body {
   display: flex;
   align-items: center;
   background-color: #F3F4F6;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 12px;
   min-height: 50px;
   border: 1.5px solid transparent;
@@ -431,7 +442,7 @@ body {
 .swap-button {
   width: 40px;
   height: 40px;
-  border-radius: 20px;
+  border-radius: 26px;
   background-color: #F3F4F6;
   border: 1.5px solid var(--border);
   display: flex;
@@ -449,7 +460,7 @@ body {
 
 .search-button {
   background-color: var(--primary-color);
-  border-radius: 25px;
+  border-radius: 30px;
   padding: 16px;
   border: none;
   margin-top: 8px;
@@ -526,7 +537,7 @@ body {
   display: flex;
   align-items: center;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 14px;
   margin-bottom: 16px;
 }
 
@@ -542,7 +553,7 @@ body {
   background-color: #FFFFFF;
   border: none;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: 10px;
   color: var(--primary-color);
   font-size: 12px;
   font-weight: 600;
@@ -560,7 +571,7 @@ body {
   justify-content: space-between;
   background-color: #F8FAFC;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 18px;
   margin-bottom: 16px;
 }
 
@@ -604,7 +615,7 @@ body {
 .stop-dot {
   width: 24px;
   height: 24px;
-  border-radius: 12px;
+  border-radius: 18px;
   background-color: var(--primary-color);
   display: flex;
   align-items: center;
@@ -729,21 +740,7 @@ body {
   font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.2px;
-}
-
-.ios-close-button {
-  position: absolute;
-  right: 14px;
-  top: 4px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: #E5E5EA;
-  padding: 0;
-}
-
-.ios-close-button:hover {
-  background: #DCDCE1;
+  padding-left: 30px;
 }
 
 .ios-profile-content {
@@ -792,7 +789,7 @@ body {
 
 .ios-list-group {
   background: #FFFFFF;
-  border-radius: 14px;
+  border-radius: 20px;
   margin-bottom: 20px;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -823,7 +820,7 @@ body {
 .ios-row-icon {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1120,7 +1117,7 @@ body {
   background-color: var(--error);
   border: none;
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: 14px;
   color: white;
   font-size: 14px;
   font-weight: 600;
@@ -1147,7 +1144,7 @@ body {
 @media (max-width: 768px) {
   .search-modal, .route-modal, .modal {
     margin: 0;
-    border-radius: 20px 20px 0px 0px;
+    border-radius: 26px 26px 0px 0px;
   }
   
   .input-row {
@@ -1231,7 +1228,7 @@ body {
 /* Search Suggestions */
 .suggestions-container {
   margin-top: 8px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: white;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   max-height: 200px;
@@ -1260,7 +1257,7 @@ body {
   margin-top: 12px;
   width: 100%;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 14px;
   border: none;
   background: var(--primary-light);
   color: #fff;
@@ -1317,7 +1314,7 @@ body {
   justify-content: center;
   gap: 8px;
   padding: 12px;
-  border-radius:20px;
+  border-radius:26px;
   background: var(--primary-light);
   color: #fff;
   text-decoration: none;
@@ -1328,7 +1325,7 @@ body {
   margin-top: 10px;
   width: 100%;
   padding: 12px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: 1px solid rgba(0,0,0,0.1);
   background: transparent;
   cursor: pointer;
@@ -1389,7 +1386,7 @@ body {
 .sign-out-confirm-button {
   width: 100%;
   padding: 12px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: none;
   background: #EF4444;
   color: #fff;
@@ -1405,7 +1402,7 @@ body {
 .sign-out-cancel-button {
   width: 100%;
   padding: 12px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: 1px solid rgba(0,0,0,0.1);
   background: transparent;
   cursor: pointer;
@@ -1466,7 +1463,7 @@ body {
 .sign-out-success-button {
   width: 100%;
   padding: 12px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: none;
   background: var(--primary-light);
   color: #fff;
@@ -1524,7 +1521,7 @@ body {
 .route-option {
   background-color: #F3F4F6;
   padding: 8px 16px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: none;
   cursor: pointer;
   white-space: nowrap;
@@ -1596,7 +1593,7 @@ body {
 .feature-icon {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: #EFF6FF;
   display: flex;
   align-items: center;
@@ -1621,7 +1618,7 @@ body {
   gap: 12px;
   padding: 12px;
   background: #F8FAFC;
-  border-radius: 8px;
+  border-radius: 14px;
 }
 
 .contact-text {
@@ -1642,7 +1639,7 @@ body {
   padding: 16px;
   background: #F8FAFC;
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   cursor: pointer;
   transition: background-color 0.2s ease;
   text-align: left;
@@ -1722,7 +1719,7 @@ body {
 
 @media (max-width: 480px) {
   .floating-bottom-sheet {
-    border-radius: 16px;
+    border-radius: 22px;
   }
   
   .floating-bottom-sheet-content {
@@ -1782,7 +1779,7 @@ body {
 .feature-icon {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: #EFF6FF;
   display: flex;
   align-items: center;
@@ -1807,7 +1804,7 @@ body {
   gap: 12px;
   padding: 12px;
   background: #F8FAFC;
-  border-radius: 8px;
+  border-radius: 14px;
 }
 
 .contact-text {
@@ -1828,7 +1825,7 @@ body {
   padding: 16px;
   background: #F8FAFC;
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   cursor: pointer;
   transition: background-color 0.2s ease;
   text-align: left;
@@ -1895,7 +1892,7 @@ body {
 .route-option {
   background-color: #F3F4F6;
   padding: 8px 16px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: none;
   cursor: pointer;
   white-space: nowrap;
@@ -2099,7 +2096,7 @@ body {
 /* Enhanced Search Card */
 .search-card {
   background: #f8fafc;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 20px;
   margin-bottom: 18px;
   border: 1.5px solid #f1f5f9;
@@ -2112,7 +2109,7 @@ body {
   display: flex;
   align-items: center;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 20px;
   padding: 14px 16px;
   border: 2px solid #f1f5f9;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -2157,7 +2154,7 @@ body {
   gap: 10px;
   background: #f8fafc;
   border: 1.5px solid #f1f5f9;
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 12px 10px;
   box-shadow: 0 1px 6px rgba(107, 33, 168, 0.04);
   transition: box-shadow 0.2s ease;
@@ -2170,7 +2167,7 @@ body {
 .summary-icon {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 16px;
   background: rgba(107, 33, 168, 0.07);
   display: flex;
   align-items: center;
@@ -2214,7 +2211,7 @@ body {
   width: 100%;
   background: rgba(107, 33, 168, 0.06);
   border: none;
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 8px 14px;
   font-size: 12px;
   color: var(--primary-color);
@@ -2272,7 +2269,7 @@ body {
 .swap-button {
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: 20px;
   background: white;
   border: 2px solid #F1F5F9;
   display: flex;
@@ -2292,7 +2289,7 @@ body {
 /* Enhanced Suggestions */
 .suggestions-container {
   background: white;
-  border-radius: 16px;
+  border-radius: 22px;
   margin-bottom: 16px;
   border: 1px solid #F1F5F9;
   overflow: hidden;
@@ -2328,7 +2325,7 @@ body {
 /* Enhanced Search Button */
 .search-button {
   background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 18px 24px;
   border: none;
   display: flex;
@@ -2370,7 +2367,7 @@ body {
 
 .summary-card {
   background: white;
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 10px;
   border: 1px solid #F1F5F9;
   display: flex;
@@ -2387,7 +2384,7 @@ body {
 .summary-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: 18px;
   background: linear-gradient(135deg, #EFF6FF, #EDE9FE);
   display: flex;
   align-items: center;
@@ -2435,7 +2432,7 @@ body {
 .route-option {
   background: white;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 18px;
   border: 2px solid #F1F5F9;
   cursor: pointer;
   white-space: nowrap;
@@ -2490,7 +2487,7 @@ body {
 
 .stops-timeline {
   background: white;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 20px;
   border: 1px solid #F1F5F9;
 }
@@ -2552,7 +2549,7 @@ body {
   flex: 1;
   padding: 12px 16px;
   background: #F8FAFC;
-  border-radius: 12px;
+  border-radius: 18px;
   border-left: 4px solid var(--primary-color);
 }
 
@@ -2576,7 +2573,7 @@ body {
   color: var(--primary-color);
   background: #EDE9FE;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   margin-left: 8px;
 }
 
@@ -2604,7 +2601,7 @@ body {
 .share-button {
   background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 14px 20px;
   color: white;
   font-weight: 600;
@@ -2625,7 +2622,7 @@ body {
 /* Enhanced Auth Banner */
 .auth-banner {
   background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 16px 20px;
   margin-bottom: 20px;
   display: flex;
@@ -2650,7 +2647,7 @@ body {
   background: rgba(255,255,255,0.2);
   border: 1px solid rgba(255,255,255,0.3);
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: 14px;
   color: white;
   font-size: 12px;
   font-weight: 600;
@@ -2667,7 +2664,7 @@ body {
 .welcome-banner {
   background: linear-gradient(135deg, var(--success), #34D399);
   padding: 16px 20px;
-  border-radius: 16px;
+  border-radius: 22px;
   margin-bottom: 20px;
   text-align: center;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
@@ -2687,7 +2684,7 @@ body {
   gap: 12px;
   padding: 20px;
   background: #F8FAFC;
-  border-radius: 16px;
+  border-radius: 22px;
   margin-top: 20px;
 }
 
@@ -2700,7 +2697,7 @@ body {
   background: transparent;
   border: 2px solid var(--primary-color);
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: 14px;
   color: var(--primary-color);
   font-size: 12px;
   font-weight: 600;
@@ -2715,28 +2712,34 @@ body {
 
 /* Enhanced Buttons */
 .close-button {
-  background: #F8FAFC;
+  width: 30px;
+  height: 30px;
+  background: rgba(120, 120, 128, 0.16);
   border: none;
   border-radius: 50%;
-  padding: 10px;
+  padding: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  color: #8E8E93;
   flex-shrink: 0;
-  margin-left: 8px;
+  transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
 .close-button:hover {
-  background: #F1F5F9;
+  background: rgba(120, 120, 128, 0.26);
   transform: scale(1.05);
+}
+
+.close-button:active {
+  transform: scale(0.94);
 }
 
 .new-search-button {
   background: var(--primary-color);
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 10px;
   display: flex;
   align-items: center;
@@ -2765,7 +2768,7 @@ body {
   }
   
   .bottom-sheet-content {
-    padding: 0 16px 16px 16px;
+    padding: 0;
   }
   
   .search-card {
@@ -2858,7 +2861,7 @@ body {
 .forgot-password-panel {
   background-color: #f9f5ff;
   border: 1.5px solid var(--primary-light);
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 16px;
   margin: 4px 0 8px;
   animation: fp-panel-in 0.22s ease;
@@ -2879,7 +2882,7 @@ body {
   background-color: var(--primary-color);
   color: #fff;
   border: none;
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 11px 0;
   width: 100%;
   font-size: 14px;
@@ -2918,7 +2921,7 @@ body {
   background-color: #10B981;
   color: #fff;
   border: none;
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 9px 28px;
   font-size: 14px;
   font-weight: 700;
@@ -2956,7 +2959,7 @@ body {
 
 .info-section {
   background: #f9fafb;
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 16px;
   border: 1px solid #e5e7eb;
 }
@@ -3018,7 +3021,7 @@ body {
   background-color: #e0f2fe;
   color: #0369a1;
   padding: 6px 12px;
-  border-radius: 16px;
+  border-radius: 22px;
   font-size: 12px;
   font-weight: 500;
   display: inline-flex;
@@ -3146,7 +3149,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 14px;
   transition: background-color 0.2s;
 }
 
@@ -3169,7 +3172,7 @@ body {
   background: rgba(59, 130, 246, 0.9);
   color: white;
   border: none;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 8px 16px;
   display: flex;
   align-items: center;
@@ -3243,7 +3246,7 @@ body {
   background-color: #e0f2fe;
   color: #0369a1;
   padding: 4px 12px;
-  border-radius: 16px;
+  border-radius: 22px;
   font-size: 12px;
   font-weight: 500;
 }
@@ -3343,7 +3346,7 @@ body {
 .refresh-indicator {
   background-color: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 8px 12px;
   margin: 0 16px 16px;
   display: flex;
@@ -3400,7 +3403,7 @@ body {
   gap: 6px;
   padding: 4px 8px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 18px;
   backdrop-filter: blur(10px);
 }
 
@@ -3436,7 +3439,7 @@ body {
   gap: 6px;
   padding: 6px;
   background: rgba(0, 0, 0, 0.7);
-  border-radius: 16px;
+  border-radius: 22px;
   backdrop-filter: blur(10px);
   z-index: 1000;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3451,7 +3454,7 @@ body {
   gap: 6px;
   padding: 6px 10px;
   background: rgba(0, 0, 0, 0.7);
-  border-radius: 16px;
+  border-radius: 22px;
   backdrop-filter: blur(10px);
   z-index: 1000;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3460,7 +3463,7 @@ body {
 .realtime-indicator {
   background-color: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 8px 12px;
   margin: 0 16px 16px;
   display: flex;
@@ -3472,7 +3475,7 @@ body {
 .realtime-update-indicator {
   background-color: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 8px 12px;
   margin: 16px;
   display: flex;
@@ -3568,7 +3571,7 @@ body, #root {
   background: rgba(34, 197, 94, 0.1);
   color: #22c55e;
   padding: 4px 8px;
-  border-radius: 12px;
+  border-radius: 18px;
   font-size: 12px;
   font-weight: 500;
 }
@@ -3580,7 +3583,7 @@ body, #root {
   background: rgba(34, 197, 94, 0.1);
   color: #22c55e;
   padding: 2px 6px;
-  border-radius: 8px;
+  border-radius: 14px;
   font-size: 11px;
   font-weight: 500;
 }
@@ -3615,13 +3618,13 @@ body, #root {
   margin-top: 12px;
   padding: 8px;
   background: rgba(59, 130, 246, 0.05);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 
 .live-updates-panel {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 18px;
   margin-top: 16px;
   overflow: hidden;
 }
@@ -3679,7 +3682,7 @@ body, #root {
   gap: 8px;
   background: rgba(59, 130, 246, 0.05);
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 14px;
   margin-bottom: 16px;
   font-size: 14px;
   color: #475569;
@@ -3691,7 +3694,7 @@ body, #root {
   align-items: center;
   padding: 12px;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 14px;
   margin-bottom: 8px;
   width: 100%;
   background: white;
@@ -3718,6 +3721,8 @@ body, #root {
 /* Recent Searches Styles */
 .recent-searches {
   margin-top: 20px;
+  margin-left: 10px;
+  margin-right: 10px;
 }
 
 .recent-searches-title {
@@ -3739,7 +3744,7 @@ body, #root {
   padding: 12px;
   background: #F8FAFC;
   border: 1px solid #F1F5F9;
-  border-radius: 12px;
+  border-radius: 18px;
   cursor: pointer;
   transition: all 0.2s ease;
   gap: 12px;
@@ -3777,7 +3782,7 @@ body, #root {
 .download-app-icon {
   width: 80px;
   height: 80px;
-  border-radius: 24px;
+  border-radius: 30px;
   background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
   display: flex;
   align-items: center;
@@ -3813,7 +3818,7 @@ body, #root {
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  border-radius: 14px;
+  border-radius: 20px;
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
@@ -3843,7 +3848,7 @@ body, #root {
   padding: 0;
   background: #F8FAFC;
   border: none;
-  border-radius: 12px;
+  border-radius: 18px;
   overflow: hidden;
   transition: background-color 0.2s ease;
 }
@@ -3929,7 +3934,7 @@ body, #root {
   color: #6b21a8;
   font-size: 11px;
   font-weight: 700;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 3px 10px;
   white-space: nowrap;
 }
@@ -3940,7 +3945,7 @@ body, #root {
   gap: 4px;
   background: #e8e8e8;
   border: 1px solid #232323;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 4px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -4037,7 +4042,7 @@ body, #root {
   flex: 1;
   background: #fafafa;
   border: 1px solid #f1f5f9;
-  border-radius: 14px;
+  border-radius: 20px;
   padding: 12px 14px;
   margin-bottom: 8px;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
@@ -4075,7 +4080,7 @@ body, #root {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   padding: 2px 8px;
-  border-radius: 20px;
+  border-radius: 26px;
 }
 
 .stop-tag--start {
@@ -4102,7 +4107,7 @@ body, #root {
   color: var(--primary-color);
   background: rgba(107,33,168,0.07);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: 26px;
   white-space: nowrap;
 }
 
@@ -4149,7 +4154,7 @@ body, #root {
   margin-top: 20px;
   background: white;
   border: 1px solid #f1f5f9;
-  border-radius: 18px;
+  border-radius: 24px;
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(0,0,0,0.04);
 }
@@ -4190,7 +4195,7 @@ body, #root {
   color: var(--primary-color);
   background: rgba(107,33,168,0.08);
   padding: 2px 8px;
-  border-radius: 20px;
+  border-radius: 26px;
   min-width: 22px;
   text-align: center;
 }
@@ -4227,7 +4232,7 @@ body, #root {
 .recent-search-icon {
   width: 30px;
   height: 30px;
-  border-radius: 10px;
+  border-radius: 16px;
   background: rgba(107,33,168,0.07);
   display: flex;
   align-items: center;
@@ -4277,7 +4282,7 @@ body, #root {
   background: none;
   border: 1px solid var(--error);
   color: var(--error);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 7px 12px;
   font-size: 13px;
   font-weight: 600;
@@ -4369,13 +4374,13 @@ body, #root {
   .summary-card {
     padding: 8px 6px;
     gap: 6px;
-    border-radius: 12px;
+    border-radius: 18px;
   }
 
   .summary-icon {
     width: 30px;
     height: 30px;
-    border-radius: 9px;
+    border-radius: 15px;
   }
 
   .summary-icon svg,
@@ -4430,7 +4435,7 @@ body, #root {
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.25);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: 26px;
   white-space: nowrap;
   letter-spacing: 0.2px;
 }
@@ -4445,14 +4450,14 @@ body, #root {
   margin-bottom: 12px;
   background: linear-gradient(135deg, rgba(168,85,247,0.08), rgba(109,33,168,0.06));
   border: 1px solid rgba(168,85,247,0.2);
-  border-radius: 12px;
+  border-radius: 18px;
 }
 
 .crumb {
   font-size: 12px;
   font-weight: 600;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   white-space: nowrap;
 }
 .crumb--start {
@@ -4586,7 +4591,7 @@ body, #root {
 
 .report-chip {
   padding: 8px 14px;
-  border-radius: 20px;
+  border-radius: 26px;
   border: 1.5px solid #E2E8F0;
   background: #F8FAFC;
   color: #64748B;
@@ -4612,7 +4617,7 @@ body, #root {
 .report-textarea {
   width: 100%;
   border: 1.5px solid #E2E8F0;
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 12px 14px;
   font-size: 14px;
   color: #1E293B;
@@ -4643,7 +4648,7 @@ body, #root {
   background: #6b21a8;
   color: #FFFFFF;
   border: none;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 14px;
   font-size: 15px;
   font-weight: 700;
@@ -4699,7 +4704,7 @@ body, #root {
   background: #6b21a8;
   color: #FFFFFF;
   border: none;
-  border-radius: 20px;
+  border-radius: 26px;
   padding: 12px 40px;
   font-size: 15px;
   font-weight: 700;
@@ -4789,11 +4794,11 @@ body, #root {
 .auth-input-container,
 .input-container,
 .forgot-password-panel .auth-input-container {
-  border-radius: 18px;
+  border-radius: 24px;
 }
 
 .report-textarea {
-  border-radius: 18px;
+  border-radius: 24px;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -4954,7 +4959,7 @@ body, #root {
 
 .ios-forgot-input-row {
   background: #F2F2F7;
-  border-radius: 14px;
+  border-radius: 20px;
   padding: 11px 14px;
 }
 
@@ -5023,4 +5028,464 @@ body, #root {
 
 .ios-forgot-done-btn:hover {
   background: #0DA271;
+}
+/* ══════════════════════════════════════════════════════════════════════════
+   Route Details — refreshed iOS-26-style redesign
+   (Placed last on purpose: these overrides win the cascade over the older,
+   duplicated rule blocks above for the same class names.)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.route-details {
+  padding: 4px 4px 24px;
+}
+
+.route-details .sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 6px 14px 16px;
+  gap: 12px;
+}
+
+.route-details .header-content {
+  min-width: 0;
+}
+
+.route-details .route-name {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: #0B0B0F;
+  margin: 0 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-details .route-subtitle {
+  font-size: 13px;
+  color: #8E8E93;
+  margin: 0;
+  font-weight: 500;
+}
+
+.route-details .header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.route-details .realtime-status {
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.route-details .new-search-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  box-shadow: 0 2px 8px rgba(107, 33, 168, 0.25);
+}
+
+.route-details .info-toggle-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(107, 33, 168, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.route-details .info-toggle-button:hover {
+  background: rgba(107, 33, 168, 0.18);
+  transform: scale(1.05);
+}
+
+/* ── Summary cards ── */
+.route-details .route-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(6px, 2vw, 10px);
+  padding: 0 14px;
+  margin-bottom: 20px;
+}
+
+.route-details .summary-card {
+  background: #FFFFFF;
+  border-radius: 18px;
+  padding: clamp(8px, 2.8vw, 14px) clamp(6px, 2vw, 12px);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: clamp(6px, 2vw, 10px);
+  min-width: 0;
+  border: 1px solid #EDEDF2;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.route-details .summary-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+}
+
+.route-details .summary-icon {
+  width: clamp(28px, 8vw, 38px);
+  height: clamp(28px, 8vw, 38px);
+  border-radius: 11px;
+  background: rgba(107, 33, 168, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.route-details .summary-icon svg {
+  width: clamp(14px, 4.2vw, 20px);
+  height: clamp(14px, 4.2vw, 20px);
+}
+
+.route-details .summary-icon .cedi-icon {
+  font-size: clamp(14px, 4.2vw, 20px) !important;
+}
+
+.route-details .summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.route-details .summary-label {
+  font-size: clamp(7.5px, 2.2vw, 9.5px);
+  font-weight: 700;
+  color: #9A9AA2;
+  text-transform: uppercase;
+  letter-spacing: 0.1px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.route-details .summary-value {
+  font-size: clamp(10px, 2.8vw, 13px);
+  font-weight: 700;
+  color: #0B0B0F;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+/* Very narrow phones: drop the icon chip's inner padding further and let
+   long values (e.g. "GH₵ 13.50") shrink instead of forcing card overflow */
+@media (max-width: 360px) {
+  .route-details .route-summary-cards {
+    gap: 5px;
+    padding: 0 10px;
+  }
+
+  .route-details .summary-card {
+    padding: 7px 6px;
+    gap: 5px;
+    border-radius: 15px;
+  }
+
+  .route-details .summary-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 9px;
+  }
+
+  .route-details .summary-label {
+    font-size: 7px;
+  }
+
+  .route-details .summary-value {
+    font-size: 9.5px;
+  }
+}
+
+/* ── Route options (multi-route picker) ── */
+.route-details .route-options-container {
+  padding: 0 14px;
+  margin-bottom: 20px;
+}
+
+.route-details .route-options-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0B0B0F;
+  margin: 0 0 10px;
+}
+
+.route-details .route-options {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.route-details .route-options::-webkit-scrollbar {
+  display: none;
+}
+
+.route-details .route-option {
+  flex: 0 0 auto;
+  min-width: 118px;
+  background: #F7F7FA;
+  border: 1.5px solid transparent;
+  border-radius: 20px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.route-details .route-option:hover {
+  transform: translateY(-1px);
+}
+
+.route-details .route-option-selected {
+  background: rgba(107, 33, 168, 0.08);
+  border-color: var(--primary-color);
+}
+
+.route-details .route-option-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0B0B0F;
+}
+
+.route-details .route-option-text-selected {
+  color: var(--primary-color);
+}
+
+.route-details .route-option-subtext {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8E8E93;
+}
+
+/* ── Stops list ── */
+.route-details .stops-list {
+  padding: 0 14px;
+}
+
+.route-details .stops-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.route-details .stops-title-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0B0B0F;
+}
+
+.route-details .stops-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-details .stops-count-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary-color);
+  background: rgba(107, 33, 168, 0.1);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.route-details .report-inline-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0B0B0F;
+  background: #F1F1F4;
+  border: none;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.route-details .report-inline-button:hover {
+  background: #E5E5EA;
+}
+
+.route-details .stops-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.route-details .stop-item-v2 {
+  display: flex;
+  gap: 12px;
+}
+
+.route-details .stop-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 26px;
+}
+
+.route-details .stop-node {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 4px #fff;
+}
+
+.route-details .stop-node--start { background: #10B981; }
+.route-details .stop-node--end   { background: #EF4444; }
+.route-details .stop-node--mid   { background: #6b21a8; }
+
+.route-details .stop-node-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.route-details .stop-connector-line {
+  flex: 1;
+  width: 3px;
+  min-height: 28px;
+  background: #E5E5EA;
+  border-radius: 2px;
+  margin: 2px 0;
+}
+
+.route-details .stop-connector-line--walk {
+  background-image: linear-gradient(#10B981 60%, transparent 0%);
+  background-size: 3px 8px;
+  background-repeat: repeat-y;
+  background-color: transparent;
+}
+
+.route-details .stop-card {
+  flex: 1;
+  min-width: 0;
+  background: #F7F7FA;
+  border-radius: 20px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.route-details .stop-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.route-details .stop-item-v2--last .stop-card {
+  margin-bottom: 0;
+}
+
+.route-details .stop-card--start {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.route-details .stop-card--end {
+  background: rgba(239, 68, 68, 0.07);
+}
+
+.route-details .stop-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.route-details .stop-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.route-details .stop-tag--start { background: #D1FAE5; color: #065F46; }
+.route-details .stop-tag--end   { background: #FEE2E2; color: #991B1B; }
+.route-details .stop-tag--mid   { background: #EDE9FE; color: #5B21B6; }
+
+.route-details .stop-walk-pill {
+  font-size: 11px;
+  font-weight: 700;
+  color: #065F46;
+  background: #D1FAE5;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.route-details .stop-fare-pill {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5B21B6;
+  background: #EDE9FE;
+  padding: 3px 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.route-details .stop-card-name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0B0B0F;
+  line-height: 1.3;
+}
+
+.route-details .stop-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.route-details .stop-meta-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #C7C7CC;
+  flex-shrink: 0;
+}
+
+.route-details .stop-card-distance {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8E8E93;
 }
