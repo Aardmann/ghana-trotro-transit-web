@@ -1,4 +1,5 @@
 const SEARCH_HISTORY_COOKIE = 'gtt_search_history';
+const COOKIE_CONSENT_COOKIE = 'gtt_cookie_consent';
 const MAX_HISTORY_ITEMS = 20;
 const COOKIE_MAX_AGE_DAYS = 365;
 
@@ -89,4 +90,17 @@ export const deleteSearchFromCookie = (itemId) => {
 export const clearSearchHistoryCookie = () => {
   deleteCookie(SEARCH_HISTORY_COOKIE);
   return [];
+};
+
+// ── Cookie consent API ─────────────────────────────────────────────────
+
+// Returns true only if the user has explicitly accepted cookie use.
+// There is no "declined" state stored - a decline is never persisted,
+// so the consent prompt will simply reappear on next load/reload.
+export const hasAcceptedCookies = () => {
+  return getCookie(COOKIE_CONSENT_COOKIE) === 'accepted';
+};
+
+export const acceptCookieConsent = () => {
+  setCookie(COOKIE_CONSENT_COOKIE, 'accepted');
 };

@@ -16,6 +16,8 @@ import {
   addSearchToCookie,
   deleteSearchFromCookie,
   clearSearchHistoryCookie,
+  hasAcceptedCookies,
+  acceptCookieConsent,
 } from '../config/cookies';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
@@ -230,6 +232,28 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
         {authLoading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
       </button>
 
+      {isSignUp && (
+        <p className="ios-auth-legal-text">
+          By signing up, you agree to our{' '}
+          <a
+            href="https://gtt.nxnx.tech/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Privacy Policy
+          </a>{' '}
+          and{' '}
+          <a
+            href="https://gtt.nxnx.tech/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Terms &amp; Conditions
+          </a>
+          .
+        </p>
+      )}
+
       {!isSignUp && (
         <>
           <button
@@ -437,6 +461,25 @@ const formatRoute = async (route) => {
 };
 
 const GhanaTrotroTransit = () => {
+  // ── Cookie consent states ──────────────────────────────────────────
+  const [cookiesAccepted, setCookiesAccepted] = useState(() => hasAcceptedCookies());
+  const [cookiesDeclined, setCookiesDeclined] = useState(false);
+  const [showCookieInfoModal, setShowCookieInfoModal] = useState(false);
+
+  const handleAcceptCookies = useCallback(() => {
+    acceptCookieConsent();
+    setCookiesAccepted(true);
+    setCookiesDeclined(false);
+    setShowCookieInfoModal(false);
+  }, []);
+
+  const handleDeclineCookies = useCallback(() => {
+    // Decline is intentionally never persisted - reloading gives the
+    // user another chance to accept.
+    setCookiesDeclined(true);
+    setShowCookieInfoModal(false);
+  }, []);
+
   // Navigation and UI states
   const [startPoint, setStartPoint] = useState('');
   const [destination, setDestination] = useState('');
@@ -2401,6 +2444,32 @@ const GhanaTrotroTransit = () => {
     );
   }, [bottomSheetContent, bottomSheetState, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
 
+  // ── Cookie consent required screen ──────────────────────────────────
+  // Cookies cannot be declined - if the user chooses not to accept,
+  // the app goes blank (white background, logo, reload button) so
+  // they can restart and accept to continue.
+  if (cookiesDeclined) {
+    return (
+      <div className="cookie-blocked-screen">
+        <div className="cookie-blocked-logo">
+          <img
+            src={`${process.env.PUBLIC_URL}/GTT-glass-icon.png`}
+            alt="Ghana Trotro Transit"
+            className="cookie-blocked-logo-img"
+          />
+          <span className="cookie-blocked-logo-text">Ghana Trotro Transit</span>
+        </div>
+        <button
+          className="cookie-blocked-reload-button"
+          onClick={() => window.location.reload()}
+        >
+          <RefreshCw size={18} color="#FFFFFF" />
+          <span>Reload App</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
       {/* Map Component - Memoized to prevent unnecessary re-renders */}
@@ -2865,6 +2934,38 @@ const GhanaTrotroTransit = () => {
               </div>
 
               <div className="info-section">
+                <h3 className="info-section-title">Legal</h3>
+                <div className="contact-list">
+                  <div className="contact-item">
+                    <Lock size={16} color={COLORS.primary} />
+                    <span className="contact-text">
+                      <a
+                        className="contact-text-help"
+                        href="https://gtt.nxnx.tech/privacy"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Privacy Policy
+                      </a>
+                    </span>
+                  </div>
+                  <div className="contact-item">
+                    <Info size={16} color={COLORS.primary} />
+                    <span className="contact-text">
+                      <a
+                        className="contact-text-help"
+                        href="https://gtt.nxnx.tech/terms"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Terms &amp; Conditions
+                      </a>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="info-section">
                 <h3 className="info-section-title">Note</h3>
                 <div className="contact-list">
                   <div className="contact-item">
@@ -3233,6 +3334,101 @@ const GhanaTrotroTransit = () => {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cookie Consent Banner ── */}
+      {!cookiesAccepted && !cookiesDeclined && (
+        <div className="cookie-consent-overlay">
+          <div className="cookie-consent-banner">
+            <p className="cookie-consent-text">
+              We use cookies to keep Ghana Trotro Transit working smoothly, including saving your search history and preferences on this device. You need to agree to continue using the app.
+            </p>
+            <div className="cookie-consent-actions">
+              <button
+                className="cookie-consent-info-button"
+                onClick={() => setShowCookieInfoModal(true)}
+              >
+                What cookies are used for
+              </button>
+              <div className="cookie-consent-main-actions">
+                <button
+                  className="cookie-consent-decline-button"
+                  onClick={handleDeclineCookies}
+                >
+                  Decline
+                </button>
+                <button
+                  className="cookie-consent-accept-button"
+                  onClick={handleAcceptCookies}
+                >
+                  Accept & Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Cookie Info Modal ── */}
+      {showCookieInfoModal && (
+        <div
+          className="modal-overlay cookie-info-modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCookieInfoModal(false); }}
+        >
+          <div className="modal cookie-info-modal">
+            <div className="modal-header">
+              <h2 className="modal-title">How We Use Cookies</h2>
+              <button
+                className="close-button"
+                onClick={() => setShowCookieInfoModal(false)}
+              >
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content">
+              <div className="info-section">
+                <div className="feature-list">
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <History size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Remembering your recent route searches so you can quickly find them again</span>
+                  </div>
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <User size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Keeping you signed in to your account between visits</span>
+                  </div>
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <Check size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Remembering that you've accepted our use of cookies</span>
+                  </div>
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <Map size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Storing basic preferences, like your last selected map layer</span>
+                  </div>
+                </div>
+                <p className="info-text">
+                  These cookies are essential to how the app functions on this device. For more detail, see our{' '}
+                  <a href="https://gtt.nxnx.tech/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
+                </p>
+              </div>
+
+              <button
+                className="cookie-info-accept-button"
+                onClick={handleAcceptCookies}
+              >
+                Accept & Continue
+              </button>
+            </div>
           </div>
         </div>
       )}
