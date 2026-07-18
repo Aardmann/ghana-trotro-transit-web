@@ -8,7 +8,7 @@ import {
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
-  Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn
+  Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -515,6 +515,15 @@ const GhanaTrotroTransit = () => {
 
   // ── User location (requires cookie/location consent) ────────────────
   const [userLocation, setUserLocation] = useState(null);
+  // Current visible map viewport (set from MapComponent's MAP_MOVED
+  // messages) — used only to decide whether the user-location dot is
+  // currently on screen, so the "locate me" button can hide itself when
+  // it doesn't need to do anything.
+  const [mapBounds, setMapBounds] = useState(null);
+  // Bumped to tell MapComponent to fly the map to the user-location marker.
+  const [recenterUserTrigger, setRecenterUserTrigger] = useState(0);
+  // Bumped to tell MapComponent to fly the map to fit the current route.
+  const [recenterRouteTrigger, setRecenterRouteTrigger] = useState(0);
   const locationRequestedRef = useRef(false);
 
   // ── Nearby stops (faint reference dots around the user) ─────────────
@@ -597,7 +606,9 @@ const GhanaTrotroTransit = () => {
   // jitters from triggering redundant fetches.
   const lastViewportFetchRef = useRef(null);
 
-  const handleMapViewportMoved = useCallback((lat, lng) => {
+  const handleMapViewportMoved = useCallback((lat, lng, bounds) => {
+    if (bounds) setMapBounds(bounds);
+
     const last = lastViewportFetchRef.current;
     if (last && haversineKm(lat, lng, last.lat, last.lng) < NEARBY_CACHE_MOVE_THRESHOLD_KM) {
       return;
@@ -605,6 +616,35 @@ const GhanaTrotroTransit = () => {
     lastViewportFetchRef.current = { lat, lng };
     fetchNearbyStops({ lat, lng });
   }, [fetchNearbyStops]);
+
+  // True only once we both have a location fix and know the current
+  // viewport — used to decide whether the "locate me" button should show.
+  const isUserLocationVisible = useMemo(() => {
+    if (!userLocation || !mapBounds) return true; // unknown yet — don't show the button
+    return (
+      userLocation.lat <= mapBounds.north &&
+      userLocation.lat >= mapBounds.south &&
+      userLocation.lng <= mapBounds.east &&
+      userLocation.lng >= mapBounds.west
+    );
+  }, [userLocation, mapBounds]);
+
+  // True only when every stop on the currently selected route already sits
+  // inside the visible map viewport — used to decide whether the "recenter
+  // to route" button should show. Mirrors isUserLocationVisible above, but
+  // checks the whole stop set rather than a single point, since a route can
+  // be partially panned off-screen even if its first stop is still visible.
+  const isRouteVisible = useMemo(() => {
+    const routeStops = selectedRoute?.stops;
+    if (!routeStops || routeStops.length < 2 || !mapBounds) return true; // unknown/none yet — don't show the button
+    return routeStops.every(
+      (s) =>
+        s.lat <= mapBounds.north &&
+        s.lat >= mapBounds.south &&
+        s.lng <= mapBounds.east &&
+        s.lng >= mapBounds.west
+    );
+  }, [selectedRoute, mapBounds]);
 
   const requestUserLocation = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -678,6 +718,20 @@ const GhanaTrotroTransit = () => {
       requestUserLocation();
     }
   }, [cookiesAccepted, requestUserLocation]);
+
+  // The very first time a location fix comes in during this session (and
+  // no route is on screen yet, so there's nothing else the view needs to
+  // show), smoothly fly the map to it — this is what puts the user's blue
+  // dot in view on a fresh app open instead of leaving the map sitting on
+  // the static default center.
+  const hasAutoCenteredOnUserRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoCenteredOnUserRef.current) return;
+    if (!userLocation || selectedRoute) return;
+    hasAutoCenteredOnUserRef.current = true;
+    setRecenterUserTrigger((t) => t + 1);
+  }, [userLocation, selectedRoute]);
+
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
   
   // Modal states
@@ -724,6 +778,10 @@ const GhanaTrotroTransit = () => {
 
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
+  // Which flow triggered the download-app modal — lets the modal show the
+  // "Create Route is mobile-only" pitch when opened from the plus button,
+  // vs a plain "get the app" pitch when opened from the Get the App button.
+  const [downloadAppModalReason, setDownloadAppModalReason] = useState('createRoute');
 
   // Forgot password panel state (inside profile modal, for logged-in users)
   const [showForgotPasswordPanel, setShowForgotPasswordPanel] = useState(false);
@@ -837,13 +895,13 @@ const GhanaTrotroTransit = () => {
     if (memoizedRouteCoordinates.length > 0) {
       return memoizedRouteCoordinates[0];
     }
-    // No route selected yet — prefer centering on the user's real position
-    // (once location permission has been granted) over the static default.
-    if (userLocation) {
-      return [userLocation.lat, userLocation.lng];
-    }
+    // No route selected — use the static default. We used to fall back to
+    // userLocation here, but that made `center` change (and rebuild the
+    // whole iframe) every time a fresh GPS fix came in. Centering on the
+    // user is instead handled by a smooth flyTo once the map has loaded
+    // (see hasAutoCenteredOnUserRef below).
     return MAP_CONFIG.center;
-  }, [memoizedRouteCoordinates, userLocation]);
+  }, [memoizedRouteCoordinates]);
 
   // Close modals when clicking outside
   const handleOverlayClick = useCallback((e, closeFunction) => {
@@ -1048,6 +1106,7 @@ const GhanaTrotroTransit = () => {
       const { data, error } = await supabase
         .from('stops')
         .select('*')
+        .eq('approved', true)
         .ilike('name', `%${query}%`)
         .limit(5);
 
@@ -1914,6 +1973,30 @@ const GhanaTrotroTransit = () => {
     }
   }, [selectedRoute]);
 
+  // Opens the currently-found route in Google Maps as a directions link —
+  // first/last stop become origin/destination, everything in between is
+  // passed as waypoints so the same stop sequence carries over.
+  const openRouteInGoogleMaps = useCallback(() => {
+    const routeStops = selectedRoute?.stops;
+    if (!routeStops || routeStops.length < 2) return;
+
+    const toCoordStr = (s) => `${s.lat},${s.lng}`;
+    const origin = toCoordStr(routeStops[0]);
+    const destination = toCoordStr(routeStops[routeStops.length - 1]);
+    // Google's directions URL supports up to ~25 stops total; trim the
+    // middle stops if a composite route happens to have more than that.
+    const waypoints = routeStops
+      .slice(1, -1)
+      .slice(0, 23)
+      .map(toCoordStr)
+      .join('|');
+
+    const params = new URLSearchParams({ api: '1', origin, destination });
+    if (waypoints) params.set('waypoints', waypoints);
+
+    window.open(`https://www.google.com/maps/dir/?${params.toString()}`, '_blank', 'noopener,noreferrer');
+  }, [selectedRoute]);
+
   const handleTouchStart = (e) => {
     const clientX = e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY;
@@ -2414,9 +2497,6 @@ const GhanaTrotroTransit = () => {
           </p>
         </div>
         <div className="header-buttons">
-          <div className="realtime-status">
-            <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
-          </div>
           <button className="new-search-button" onClick={resetSearch} title="New Search">
             <Search size={18} color="#FFFFFF" />
           </button>
@@ -2942,6 +3022,8 @@ const GhanaTrotroTransit = () => {
         currentUserId={user?.id ?? null}
         volunteerMode={volunteerMode}
         onMapTap={handleMapTap}
+        recenterUserTrigger={recenterUserTrigger}
+        recenterRouteTrigger={recenterRouteTrigger}
       />
 
       {/* App Title in Top Left */}
@@ -2959,10 +3041,72 @@ const GhanaTrotroTransit = () => {
 
       <button
         className="plus-button"
-        onClick={() => setShowDownloadAppModal(true)}
+        onClick={() => { setDownloadAppModalReason('createRoute'); setShowDownloadAppModal(true); }}
       >
         <Plus size={20} color="#FFFFFF" />
       </button>
+
+      {/* Get the App — sits right below the plus button, white background
+          so it stands out from the solid purple buttons around it. */}
+      <button
+        className="get-app-button"
+        onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
+        aria-label="Get the app"
+      >
+        <svg fill="var(--primary-color)" width="400px" height="400px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
+      </button>
+
+      {/* Stacked bottom-right action buttons. These sit in a single flex
+          column so that whichever ones are conditionally hidden (Google
+          Maps, Locate Me, Recenter Route) never leave a gap behind them —
+          the remaining buttons simply close the space. Rendered in
+          bottom-to-top DOM order since the container is column-reverse. */}
+      <div className="map-action-stack">
+        {/* Info Button with conditional opacity */}
+        <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
+          <Info size={20} color="#FFFFFF" />
+        </button>
+
+        {/* Locate Me — only shown when we have a location fix AND that dot
+            isn't currently visible on screen; tapping it pans/zooms the map
+            back to it rather than re-requesting permission. */}
+        {userLocation && !isUserLocationVisible && (
+          <button
+            className="locate-button"
+            onClick={() => setRecenterUserTrigger((t) => t + 1)}
+            aria-label="Show my location"
+          >
+            <Navigation size={20} color="#FFFFFF" />
+          </button>
+        )}
+
+        {/* Open in Google Maps — only once a route has actually been found;
+            opens the same stop sequence as turn-by-turn directions. */}
+        {selectedRoute && (
+          <button
+            className="google-maps-button"
+            onClick={openRouteInGoogleMaps}
+            aria-label="Open route in Google Maps"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="100" height="100" viewBox="0 0 64 64">
+<path fill="#48b564" d="M35.76,26.36h0.01c0,0-3.77,5.53-6.94,9.64c-2.74,3.55-3.54,6.59-3.77,8.06	C24.97,44.6,24.53,45,24,45s-0.97-0.4-1.06-0.94c-0.23-1.47-1.03-4.51-3.77-8.06c-0.42-0.55-0.85-1.12-1.28-1.7L28.24,22l8.33-9.88	C37.49,14.05,38,16.21,38,18.5C38,21.4,37.17,24.09,35.76,26.36z"></path><path fill="#fcc60e" d="M28.24,22L17.89,34.3c-2.82-3.78-5.66-7.94-5.66-7.94h0.01c-0.3-0.48-0.57-0.97-0.8-1.48L19.76,15	c-0.79,0.95-1.26,2.17-1.26,3.5c0,3.04,2.46,5.5,5.5,5.5C25.71,24,27.24,23.22,28.24,22z"></path><path fill="#2c85eb" d="M28.4,4.74l-8.57,10.18L13.27,9.2C15.83,6.02,19.69,4,24,4C25.54,4,27.02,4.26,28.4,4.74z"></path><path fill="#ed5748" d="M19.83,14.92L19.76,15l-8.32,9.88C10.52,22.95,10,20.79,10,18.5c0-3.54,1.23-6.79,3.27-9.3	L19.83,14.92z"></path><path fill="#5695f6" d="M28.24,22c0.79-0.95,1.26-2.17,1.26-3.5c0-3.04-2.46-5.5-5.5-5.5c-1.71,0-3.24,0.78-4.24,2L28.4,4.74	c3.59,1.22,6.53,3.91,8.17,7.38L28.24,22z"></path>
+</svg>
+          </button>
+        )}
+
+        {/* Recenter Route — only shown once a route is selected AND some
+            part of it has been panned off-screen; tapping it flies the map
+            back to fit the whole route, same as the initial auto-fit. */}
+        {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
+          <button
+            className="route-button"
+            onClick={() => setRecenterRouteTrigger((t) => t + 1)}
+            aria-label="Recenter on route"
+          >
+            <Map size={18} color="#FFFFFF" />
+          </button>
+        )}
+      </div>
 
       {/*
        {user && (
@@ -2984,11 +3128,6 @@ const GhanaTrotroTransit = () => {
         </span>
       </div>
       */}
-
-      {/* Info Button with conditional opacity */}
-      <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
-        <Info size={20} color="#FFFFFF" />
-      </button>
 
       {/* Bottom Sheet - Slides up from bottom, draggable */}
       {showBottomSheet && (
@@ -3676,14 +3815,28 @@ const GhanaTrotroTransit = () => {
               </button>
             </div>
             <div className="modal-content download-app-content">
-              <div className="download-app-icon">
-                <Plus size={40} color={COLORS.background} />
-              </div>
-              <h3 className="download-app-heading">Create Route</h3>
-              <p className="download-app-text">
-                The <strong>Create Route</strong> feature is available exclusively on our mobile app.
-                Download Ghana Trotro Transit to create and share custom trotro routes on the go.
-              </p>
+              {downloadAppModalReason === 'createRoute' ? (
+                <>
+                  <div className="download-app-icon">
+                    <Plus size={40} color={COLORS.background} />
+                  </div>
+                  <h3 className="download-app-heading">Create Route</h3>
+                  <p className="download-app-text">
+                    The <strong>Create Route</strong> feature is available exclusively on our mobile app.
+                    Download Ghana Trotro Transit to create and share custom trotro routes on the go.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="download-app-icon">
+                    <Download size={40} color={COLORS.background} />
+                  </div>
+                  <h3 className="download-app-heading">Get the App</h3>
+                  <p className="download-app-text">
+                    Get Ghana Trotro Transit on your phone for a faster, native experience — download it below.
+                  </p>
+                </>
+              )}
               <div className="download-app-buttons">
                 <a
                   href="https://gtt.nxnx.tech/#download"

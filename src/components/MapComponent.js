@@ -23,6 +23,8 @@ const MapComponent = React.memo(({
   currentUserId = null,
   volunteerMode = false,
   onMapTap,
+  recenterUserTrigger = 0,
+  recenterRouteTrigger = 0,
 }) => {
   const iframeRef = useRef(null);
   const mapReadyRef = useRef(false);
@@ -49,6 +51,41 @@ const MapComponent = React.memo(({
     if (!mapReadyRef.current || !iframeRef.current?.contentWindow) return;
     try {
       iframeRef.current.contentWindow.postMessage({ type: 'STOP_IMAGES_SYNC', images }, '*');
+    } catch (e) {}
+  }, []);
+
+  // Pushes a fresh location fix (or null) into the iframe without reloading
+  // the map — a full HTML regeneration on every location update would reset
+  // zoom/pan/bearing and cause a jarring "flash" every time the device's
+  // GPS fix refreshes.
+  const syncUserLocation = useCallback((location) => {
+    if (!mapReadyRef.current || !iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'USER_LOCATION_UPDATE', location: location || null }, '*');
+    } catch (e) {}
+  }, []);
+
+  // Sends the map a message to fly/pan to the user-location marker. If this
+  // fires before the map has finished loading (e.g. a cached location
+  // resolves faster than the map tiles/JS do), it's queued in
+  // pendingRecenterRef and flushed once MAP_READY comes in instead of being
+  // dropped silently.
+  const pendingRecenterRef = useRef(false);
+  const flyToUser = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_USER' }, '*');
+    } catch (e) {}
+  }, []);
+
+  // Same idea as flyToUser above, but fits the map to the whole route
+  // (using the bounds already computed when the route was drawn) instead
+  // of centering on a single point.
+  const pendingRecenterRouteRef = useRef(false);
+  const flyToRoute = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_ROUTE' }, '*');
     } catch (e) {}
   }, []);
 
@@ -126,6 +163,13 @@ const MapComponent = React.memo(({
     loadImages();
     return () => { cancelled = true; };
   }, [stops, currentUserId, syncStopImages]);
+
+  // Whenever React's userLocation changes (a fresh GPS fix, permission
+  // newly granted, etc.), push it into the already-running map instead of
+  // rebuilding the iframe from scratch.
+  useEffect(() => {
+    syncUserLocation(userLocation);
+  }, [userLocation, syncUserLocation]);
 
   // Uploads a new stop photo (pending approval) and updates local + iframe state.
   // No sign-in required — anyone can contribute a photo of a stop; it just
@@ -222,10 +266,12 @@ const MapComponent = React.memo(({
 
   // A fresh blobUrl means a brand-new iframe with zero dots on it, so the
   // "already sent" set resets — the MAP_READY handler will resend the full
-  // current list once that new iframe finishes loading.
+  // current list once that new iframe finishes loading. NOTE: userLocation
+  // is intentionally excluded — it's synced live via postMessage (see
+  // syncUserLocation below) rather than triggering a full iframe rebuild.
   useEffect(() => {
     knownNearbyKeysRef.current = new Set();
-  }, [center, routeCoordinates, stops, userLocation, primaryColor, volunteerMode]);
+  }, [center, routeCoordinates, stops, primaryColor, volunteerMode]);
 
   // Listen for layer-change / map-ready / stop-photo messages from the iframe
   useEffect(() => {
@@ -241,6 +287,15 @@ const MapComponent = React.memo(({
           markMapSeenBefore();
         }
         syncStopImages(stopImagesByStop);
+        syncUserLocation(userLocation);
+        if (pendingRecenterRef.current) {
+          pendingRecenterRef.current = false;
+          flyToUser();
+        }
+        if (pendingRecenterRouteRef.current) {
+          pendingRecenterRouteRef.current = false;
+          flyToRoute();
+        }
         // Fresh iframe always starts with zero nearby-stop dots — send the
         // full current list now that it's ready to receive them.
         const currentNearby = nearbyStopsRef.current || [];
@@ -257,12 +312,42 @@ const MapComponent = React.memo(({
         onNearbyStopSelect(e.data.name, e.data.lat, e.data.lng);
       }
       if (e.data?.type === 'MAP_MOVED' && onMapMoved) {
-        onMapMoved(e.data.lat, e.data.lng);
+        onMapMoved(e.data.lat, e.data.lng, e.data.bounds);
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onLayerChange, stopImagesByStop, syncStopImages, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops]);
+  }, [onLayerChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops]);
+
+  // Skip the very first render (trigger starts at 0) — only fire when the
+  // parent actually bumps the counter in response to a tap (or the
+  // one-time auto-center-on-open effect).
+  const isFirstRecenterRef = useRef(true);
+  useEffect(() => {
+    if (isFirstRecenterRef.current) {
+      isFirstRecenterRef.current = false;
+      return;
+    }
+    if (mapReadyRef.current) {
+      flyToUser();
+    } else {
+      pendingRecenterRef.current = true;
+    }
+  }, [recenterUserTrigger, flyToUser]);
+
+  // Same skip-first-render guard as above, for the "recenter on route" button.
+  const isFirstRecenterRouteRef = useRef(true);
+  useEffect(() => {
+    if (isFirstRecenterRouteRef.current) {
+      isFirstRecenterRouteRef.current = false;
+      return;
+    }
+    if (mapReadyRef.current) {
+      flyToRoute();
+    } else {
+      pendingRecenterRouteRef.current = true;
+    }
+  }, [recenterRouteTrigger, flyToRoute]);
 
   const generateHTML = useCallback(() => {
     const lat = center[0];
@@ -349,11 +434,33 @@ const MapComponent = React.memo(({
     .nearby-stop-popup.maplibregl-popup-anchor-left   .maplibregl-popup-tip{border-right-color:rgba(0,0,0,0.7) !important;}
     .nearby-stop-popup.maplibregl-popup-anchor-right  .maplibregl-popup-tip{border-left-color:rgba(0,0,0,0.7) !important;}
 
+    /* ── Toast — brief confirmation banner (e.g. photo upload success) ── */
+    .map-toast{
+      position:absolute;left:50%;top:28px;
+      transform:translateX(-50%) translateY(12px);
+      background:rgba(17,24,39,0.92);color:#fff;
+      font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+      font-size:13px;font-weight:600;
+      padding:11px 18px;border-radius:24px;
+      box-shadow:0 6px 20px rgba(0,0,0,0.28);
+      display:flex;align-items:center;gap:8px;
+      opacity:0;transition:opacity 0.25s ease,transform 0.25s ease;
+      z-index:5000;pointer-events:none;white-space:nowrap;
+    }
+    .map-toast.map-toast-visible{
+      opacity:1;transform:translateX(-50%) translateY(0);
+    }
+    .map-toast-check{
+      width:16px;height:16px;border-radius:50%;
+      background:#10B981;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;
+    }
+
     /* ── Stop photo badge — small square "pin" pointing at each stop ── */
     .stop-photo-badge{
       width:34px;height:34px;border-radius:9px;
       background-color:#fff;background-position:center;background-size:cover;background-repeat:no-repeat;
-      border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);
+      border:1.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);
       cursor:pointer;display:flex;align-items:center;justify-content:center;
       -webkit-tap-highlight-color:transparent;
     }
@@ -363,7 +470,7 @@ const MapComponent = React.memo(({
       border-top:7px solid #fff;
     }
     .stop-photo-badge.empty{ background-color:${primaryColor}; }
-    .stop-photo-plus{ color:#fff;font-size:19px;font-weight:700;line-height:1;pointer-events:none; }
+    .stop-photo-plus{ color:#fff;font-size:19px;font-weight:700;line-height:1;pointer-events:none; margin-top: -5px;}
     .stop-photo-count{
       position:absolute;bottom:-4px;right:-4px;background:#1E293B;color:#fff;
       font-size:9px;font-weight:700;border-radius:8px;padding:1px 4px;line-height:1.35;
@@ -411,6 +518,7 @@ const MapComponent = React.memo(({
 <body>
 <div id="map"></div>
 <input type="file" id="stopPhotoInput" accept="image/*" style="display:none" />
+<div id="mapToast" class="map-toast"></div>
 
 
 <div class="map-controls">
@@ -540,20 +648,26 @@ map.on('load', function() {
   });
 
   try { window.parent.postMessage({ type: 'MAP_READY' }, '*'); } catch(e) {}
+  reportViewport();
 });
 
-// ── Report map panning to the parent app ──────────────────────────────────
-// Whenever the user finishes panning/zooming, let React know where the map
-// is now centered so it can fetch (and device-cache) the stops around
-// whichever area is currently on screen — independent of the user's real
-// GPS location.
-map.on('moveend', function() {
+// ── Report map viewport to the parent app ─────────────────────────────────
+// Sent on load and whenever panning/zooming finishes, so React knows both
+// where the map is centered (to fetch/cache stops for that area) and the
+// current visible bounds (to know whether the user-location dot is on screen).
+function reportViewport() {
   if (!mapReady) return;
   var c = map.getCenter();
+  var b = map.getBounds();
   try {
-    window.parent.postMessage({ type: 'MAP_MOVED', lat: c.lat, lng: c.lng }, '*');
+    window.parent.postMessage({
+      type: 'MAP_MOVED',
+      lat: c.lat, lng: c.lng,
+      bounds: { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() }
+    }, '*');
   } catch (e) {}
-});
+}
+map.on('moveend', reportViewport);
 
 // ── Compass — rotates opposite to map bearing ─────────────────────────────────
 function updateCompass() {
@@ -991,7 +1105,7 @@ function createNearbyStopMarker(stop) {
     'width:11px;height:11px;border-radius:50%;' +
     'background:#000;' +
     'box-shadow:0 0 0 1.5px rgba(255,255,255,0.6),0 1px 4px rgba(0,0,0,0.4);' +
-    'cursor:pointer;';
+    'cursor:pointer;touch-action:none;';
   // Newly-spawned dots ease in/out rather than popping.
   el.style.opacity = '0';
   el.style.transition = 'opacity 0.35s ease-out';
@@ -1014,11 +1128,13 @@ function createNearbyStopMarker(stop) {
   nearbyMarkerEntries.push({ stop: stop, el: el, tier: tierForKey(nearbyKeyFor(stop)) });
 
   var lastTapAt = 0;
-  el.addEventListener('click', function(e) {
-    e.stopPropagation();
+  var DOUBLE_TAP_MS = 350;
+
+  function handleTap(e) {
+    if (e) e.stopPropagation();
     var now = Date.now();
 
-    if (now - lastTapAt < 350) {
+    if (now - lastTapAt < DOUBLE_TAP_MS) {
       // Second tap within the window — treat as a double tap/click.
       lastTapAt = 0;
       popup.remove();
@@ -1037,7 +1153,26 @@ function createNearbyStopMarker(stop) {
     } else {
       popup.setLngLat([stop.lng, stop.lat]).addTo(map);
     }
-  });
+  }
+
+  // On touch devices, a rapid pair of taps on this dot is otherwise
+  // intercepted by MapLibre's own double-tap-to-zoom gesture (it listens
+  // for touchstart/touchend on the map canvas, which these events would
+  // bubble up to) — so the map zooms in instead of the second "click"
+  // ever reaching this element. Stopping propagation on touchstart keeps
+  // the map's handler from ever seeing the gesture, and handling the tap
+  // directly off touchend (with preventDefault, which also suppresses the
+  // browser's native double-tap-to-zoom and the synthetic "click" that
+  // would otherwise follow) makes double-tap detection reliable on mobile.
+  el.addEventListener('touchstart', function(e) { e.stopPropagation(); }, { passive: true });
+  el.addEventListener('touchend', function(e) {
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+    handleTap(e);
+  }, { passive: false });
+
+  // Desktop mouse clicks (no preceding touch) still go through here.
+  el.addEventListener('click', handleTap);
 }
 
 // Spawns markers only for stops not already on the map — used for both the
@@ -1181,6 +1316,23 @@ function refreshBadgeForStop(stopId) {
   drawStopPhotoBadges();
 }
 
+// ── Brief confirmation toast (e.g. "Image sent successfully") ──────────────
+var toastHideTimer = null;
+function showToast(message) {
+  var toastEl = document.getElementById('mapToast');
+  if (!toastEl) return;
+  toastEl.innerHTML =
+    '<span class="map-toast-check">' +
+    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polyline points="20 6 9 17 4 12"></polyline></svg></span>' +
+    '<span>' + message + '</span>';
+  toastEl.classList.add('map-toast-visible');
+  if (toastHideTimer) clearTimeout(toastHideTimer);
+  toastHideTimer = setTimeout(function() {
+    toastEl.classList.remove('map-toast-visible');
+  }, 2600);
+}
+
 // ── Add-photo flow (file picker; mobile browsers offer camera or gallery) ───
 function triggerFileInput(stopId) {
   pendingUploadStopId = stopId;
@@ -1265,6 +1417,20 @@ function openLightbox(stop) {
 // ── Messages from React (photo data sync + upload results) ──────────────────
 window.addEventListener('message', function(e) {
   if (!e.data) return;
+  if (e.data.type === 'FLY_TO_USER') {
+    if (userLoc && mapReady) {
+      map.flyTo({ center: [userLoc.lng, userLoc.lat], zoom: Math.max(map.getZoom(), 15), essential: true });
+    }
+  }
+  if (e.data.type === 'FLY_TO_ROUTE') {
+    if (routeBounds && mapReady) {
+      map.fitBounds(routeBounds, { padding: 60, animate: true, duration: 800 });
+    }
+  }
+  if (e.data.type === 'USER_LOCATION_UPDATE') {
+    userLoc = e.data.location || null;
+    drawUserLocation();
+  }
   if (e.data.type === 'STOP_IMAGES_SYNC') {
     stopImagesMap = e.data.images || {};
     drawStopPhotoBadges();
@@ -1276,6 +1442,7 @@ window.addEventListener('message', function(e) {
     setBadgeUploading(e.data.stopId, false);
     if (e.data.success) {
       refreshBadgeForStop(e.data.stopId);
+      showToast('Image sent successfully');
     } else if (e.data.error) {
       alert(e.data.error);
     }
@@ -1285,7 +1452,13 @@ window.addEventListener('message', function(e) {
 </body>
 </html>`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [center, routeCoordinates, stops, userLocation, primaryColor, volunteerMode]);
+  }, [center, routeCoordinates, stops, primaryColor, volunteerMode]);
+  // NOTE: `userLocation` is intentionally left out of this dependency list
+  // too, for the same reason as `nearbyStops` below — embedding it only
+  // seeds the iframe's *initial* user-location dot; after that, updates are
+  // pushed in live via syncUserLocation/USER_LOCATION_UPDATE instead of
+  // rebuilding the whole map (which used to reset zoom/pan/bearing and
+  // cause a visible "flash" every time a fresh GPS fix came in).
   // NOTE: `nearbyStops` is intentionally left out of this dependency list.
   // Embedding it only seeds the iframe's *initial* set of nearby-stop dots;
   // after that, new stops are pushed in live via postMessage (see the

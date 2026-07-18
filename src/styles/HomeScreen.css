@@ -62,11 +62,84 @@ body {
   height: 48px;
 }
 
-.info-button {
-  bottom: 30px;
+/* Get the App — same slot pattern as profile/plus, but white so it reads
+   as a distinct, lighter action against the solid purple buttons above it. */
+.get-app-button {
+  position: absolute;
+  top: 140px;
   right: 20px;
   width: 48px;
   height: 48px;
+  padding-left: 10px;
+  padding-top: 9px;
+  background-color: #ffffff;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  z-index: 1000;
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.get-app-button:hover {
+  transform: scale(1.05);
+}
+
+/* ── Bottom-right action button stack ─────────────────────────────────
+   All conditionally-rendered bottom-right buttons (Info, Locate Me,
+   Google Maps, Recenter Route) live inside this single flex container
+   instead of each being independently absolute-positioned with a fixed
+   `bottom` offset. That way, whenever one of them isn't rendered (e.g.
+   no route selected, or the user's location is already on screen), the
+   remaining buttons simply close the gap instead of leaving dead space
+   where the hidden button used to be.
+   Rendered in bottom-to-top DOM order (info, locate, google-maps,
+   route) with column-reverse, so the info button anchors the bottom
+   and everything else stacks upward above it. */
+.map-action-stack {
+  position: absolute;
+  bottom: 30px;
+  right: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 12px;
+  z-index: 1000;
+}
+
+.locate-button,
+.google-maps-button,
+.route-button,
+.info-button {
+  position: static;
+  width: 48px;
+  height: 48px;
+  background-color: var(--primary-color);
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.google-maps-button {
+  background-color: #fff;
+  padding-left: 10px;
+  padding-top: 10px;
+}
+
+.locate-button:hover,
+.google-maps-button:hover,
+.route-button:hover,
+.info-button:hover {
+  transform: scale(1.05);
+  background-color: #8b5cf6;
 }
 
 /* Map mode toggle — bottom left */
@@ -314,7 +387,7 @@ body {
 .input-clear-btn {
   background: none;
   border: none;
-  padding: 2px 4px;
+  padding: 2px 2px;
   cursor: pointer;
   color: var(--text-light);
   display: flex;
@@ -1219,13 +1292,22 @@ body {
     z-index: 1;
   }
 
-  .floating-button{
-    bottom: 80px;
+  .get-app-button{
+    top:160px;
+    z-index: 1;
   }
 
-  .info-button{
+  /* The stack container now owns positioning for locate/google-maps/
+     route/info — bumped up from the default 30px so it clears the
+     floating search button on small screens, same as before. */
+  .map-action-stack {
     bottom: 80px;
     right: 20px;
+    z-index: 1;
+  }
+
+  .floating-button{
+    bottom: 80px;
   }
 
   .map-mode-button {
@@ -2277,25 +2359,11 @@ body {
   align-items: center;
 }
 
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.status-indicator.connected {
-  background: var(--success);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
-}
-
-.status-indicator.disconnected {
-  background: #9ca3af;
-}
-
 /* ── Z-index hierarchy ──────────────────────────────── */
 .profile-button,
 .plus-button,
-.info-button,
+.get-app-button,
+.map-action-stack,
 .floating-button { z-index: 1000; }
 
 .modal-overlay       { z-index: 1003; }
@@ -2884,6 +2952,10 @@ body {
 /* Make sure other buttons remain fully opaque */
 .profile-button,
 .plus-button,
+.get-app-button,
+.locate-button,
+.google-maps-button,
+.route-button,
 .floating-button {
   opacity: 1 !important;
 }
@@ -3189,19 +3261,20 @@ body {
 
 /* Info toggle button */
 .info-toggle-button {
-  background: none;
+  background: rgba(107, 33, 168, 0.1);
   border: none;
   cursor: pointer;
   padding: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: 32px;
   transition: background-color 0.2s;
 }
 
 .info-toggle-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  background: rgba(107, 33, 168, 0.18);
+  transform: scale(1.05);
 }
 
 /* Swipe indicator */
@@ -3569,6 +3642,7 @@ body {
 .modal-overlay,
 .profile-button,
 .plus-button,
+.get-app-button,
 .info-button,
 .floating-button {
   animation: none !important;
