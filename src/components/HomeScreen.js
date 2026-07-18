@@ -8,7 +8,7 @@ import {
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
-  Eye, EyeOff
+  Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -18,12 +18,25 @@ import {
   clearSearchHistoryCookie,
   hasAcceptedCookies,
   acceptCookieConsent,
+  hasGrantedLocationBefore,
+  markLocationGranted,
+  getCachedUserLocation,
+  setCachedUserLocation,
+  getCachedNearbyStops,
+  setCachedNearbyStops,
+  getCachedStopSearch,
+  setCachedStopSearch,
+  getCachedUserSearchHistory,
+  setCachedUserSearchHistory,
+  haversineKm,
+  NEARBY_RADIUS_KM,
+  NEARBY_CACHE_MOVE_THRESHOLD_KM,
 } from '../config/cookies';
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
 
-const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
+const AuthForm = ({ onSignIn, onSignUp, authLoading, onForgotPasswordOpen }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -259,7 +272,11 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading }) => {
           <button
             className="ios-auth-forgot"
             onClick={() => {
-              setShowForgotPanel(prev => !prev);
+              setShowForgotPanel(prev => {
+                const next = !prev;
+                if (next) onForgotPasswordOpen?.();
+                return next;
+              });
               setFpSent(false);
               setFpEmail('');
             }}
@@ -368,6 +385,7 @@ const fetchCompositeSegments = async (routeId) => {
       toName:       lastStop?.name  ?? '',
       // All coordinates for this sub-route (used to build the map path)
       allCoords: sorted.map(rs => ({
+        id:   rs.stops.id,
         name: rs.stops.name,
         lat:  parseFloat(rs.stops.latitude),
         lng:  parseFloat(rs.stops.longitude),
@@ -409,6 +427,7 @@ const fetchCompositeSegments = async (routeId) => {
         : (isWalkSeg ? 0 : null);
 
       mapStops.push({
+        id:          c.id,
         name:        c.name,
         lat:         c.lat,
         lng:         c.lng,
@@ -451,6 +470,7 @@ const formatRoute = async (route) => {
     is_composite:   false,
     compositionSegments: [],
     stops: sortedStops.map(rs => ({
+      id:               rs.stops.id,
       name:             rs.stops.name,
       lat:              parseFloat(rs.stops.latitude),
       lng:              parseFloat(rs.stops.longitude),
@@ -492,6 +512,172 @@ const GhanaTrotroTransit = () => {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
+
+  // ── User location (requires cookie/location consent) ────────────────
+  const [userLocation, setUserLocation] = useState(null);
+  const locationRequestedRef = useRef(false);
+
+  // ── Nearby stops (faint reference dots around the user) ─────────────
+  // Fetched once per location (device-cached — see fetchNearbyStops below)
+  // rather than every time the app is opened or refreshed.
+  const [nearbyStops, setNearbyStops] = useState([]);
+
+  // Merges a freshly-fetched (or cached) batch into whatever nearby stops
+  // are already known, deduping by id, so the visible dot set only ever
+  // grows as the user pans — it never gets replaced/reset on each fetch.
+  const mergeNearbyStops = useCallback((batch) => {
+    setNearbyStops((prev) => {
+      const seen = new Set(prev.map((s) => s.id));
+      const additions = batch.filter((s) => !seen.has(s.id));
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+  }, []);
+
+  const fetchNearbyStops = useCallback(async (coords) => {
+    if (!coords) return;
+
+    // Serve straight from the device cache when it's still fresh and the
+    // user hasn't moved far enough away to make it stale.
+    const cached = getCachedNearbyStops(coords.lat, coords.lng);
+    if (cached) {
+      mergeNearbyStops(cached);
+      return;
+    }
+
+    try {
+      // Rough bounding box first (cheap on the DB), then an exact
+      // haversine check below to trim it down to a true 2km circle.
+      const latDelta = NEARBY_RADIUS_KM / 111;
+      const lngDelta = NEARBY_RADIUS_KM / (111 * Math.cos((coords.lat * Math.PI) / 180));
+
+      const { data, error } = await supabase
+        .from('stops')
+        .select('id, name, latitude, longitude')
+        .eq('approved', true)
+        .gte('latitude', coords.lat - latDelta)
+        .lte('latitude', coords.lat + latDelta)
+        .gte('longitude', coords.lng - lngDelta)
+        .lte('longitude', coords.lng + lngDelta);
+
+      if (error) throw error;
+
+      const nearby = (data || [])
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          lat: parseFloat(s.latitude),
+          lng: parseFloat(s.longitude),
+        }))
+        .filter((s) => haversineKm(coords.lat, coords.lng, s.lat, s.lng) <= NEARBY_RADIUS_KM);
+
+      mergeNearbyStops(nearby);
+      setCachedNearbyStops(coords.lat, coords.lng, nearby);
+    } catch (error) {
+      console.error('Error fetching nearby stops:', error);
+    }
+  }, [mergeNearbyStops]);
+
+  // Runs once userLocation becomes available (see requestUserLocation
+  // below) — cache-first, so a refresh won't hit the DB again unless the
+  // cache expired or the user moved. This only ever fires if the user has
+  // granted location access; otherwise userLocation stays null and no
+  // location-based lookup happens at all.
+  useEffect(() => {
+    if (userLocation) {
+      fetchNearbyStops(userLocation);
+    }
+  }, [userLocation, fetchNearbyStops]);
+
+  // ── Stops for whatever area the user has panned the map to ──────────
+  // Unlike the location-based fetch above, this doesn't require location
+  // permission at all — it's just based on where the user is looking on
+  // the map. Reuses the same cache-first fetchNearbyStops + device cache,
+  // so revisiting an area already seen (this session or a past one)
+  // doesn't re-hit the DB. A simple distance check keeps small map
+  // jitters from triggering redundant fetches.
+  const lastViewportFetchRef = useRef(null);
+
+  const handleMapViewportMoved = useCallback((lat, lng) => {
+    const last = lastViewportFetchRef.current;
+    if (last && haversineKm(lat, lng, last.lat, last.lng) < NEARBY_CACHE_MOVE_THRESHOLD_KM) {
+      return;
+    }
+    lastViewportFetchRef.current = { lat, lng };
+    fetchNearbyStops({ lat, lng });
+  }, [fetchNearbyStops]);
+
+  const requestUserLocation = useCallback(() => {
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const coords = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setUserLocation(coords);
+        // Permission was granted - remember that so we never call
+        // getCurrentPosition again until cookie consent is given fresh,
+        // and cache the coords so even a silent re-fetch isn't needed
+        // again for another 30 days.
+        markLocationGranted();
+        setCachedUserLocation(coords);
+
+        // Persist location for signed-in users only (location_history and
+        // users.last_location both key off a real user id). Guests still
+        // see the marker on their own map, it's just not stored server-side.
+        if (user?.id) {
+          try {
+            await supabase
+              .from('users')
+              .update({ last_location: coords, last_seen_at: new Date().toISOString() })
+              .eq('id', user.id);
+
+            await supabase.from('location_history').insert({
+              user_id: user.id,
+              latitude: coords.lat,
+              longitude: coords.lng,
+              accuracy: position.coords.accuracy ?? null,
+            });
+          } catch (error) {
+            console.error('Error storing user location:', error);
+          }
+        }
+      },
+      (error) => {
+        console.warn('Geolocation unavailable or denied:', error.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, [user]);
+
+  // Once the user has accepted cookies/location consent, get their
+  // location - but only ever calls the actual geolocation API (which is
+  // what can prompt the user) once. After that first grant, a cached
+  // location is used instead; the API is only called again silently (no
+  // prompt, since permission is already granted) if that cache has gone
+  // stale, and never re-prompts from scratch until cookie consent itself
+  // has to be given again.
+  useEffect(() => {
+    if (!cookiesAccepted || locationRequestedRef.current) return;
+    locationRequestedRef.current = true;
+
+    const cachedLocation = getCachedUserLocation();
+    if (cachedLocation) {
+      setUserLocation(cachedLocation);
+    }
+
+    if (!hasGrantedLocationBefore()) {
+      // Never granted before under the current consent - this is the one
+      // real "ask".
+      requestUserLocation();
+    } else if (!cachedLocation) {
+      // Already granted previously, cache just expired - refresh silently;
+      // the browser won't show a permission prompt for an already-granted
+      // permission.
+      requestUserLocation();
+    }
+  }, [cookiesAccepted, requestUserLocation]);
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
   
   // Modal states
@@ -507,12 +693,30 @@ const GhanaTrotroTransit = () => {
 
   // Profile modal — Account sub-view state
   const [profileView, setProfileView] = useState('menu'); // 'menu' | 'account'
+  // Guests see the normal profile menu first — this only flips to true once
+  // they tap Account, Search History, or the header Sign In button.
+  const [showGuestSignIn, setShowGuestSignIn] = useState(false);
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [nameUpdateLoading, setNameUpdateLoading] = useState(false);
   const [nameUpdateSuccess, setNameUpdateSuccess] = useState(false);
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+
+  // ── Volunteer mode: tap the map to add a new stop ────────────────────
+  const [volunteerMode, setVolunteerMode] = useState(false);
+  const [pendingStopCoords, setPendingStopCoords] = useState(null); // { lat, lng }
+  const [showAddStopModal, setShowAddStopModal] = useState(false);
+  const [newStopName, setNewStopName] = useState('');
+  const [newStopImages, setNewStopImages] = useState([]); // File[]
+  const [addStopSubmitting, setAddStopSubmitting] = useState(false);
+  const [addStopSuccess, setAddStopSuccess] = useState(false);
+
+  // ── Donate (Paystack) ─────────────────────────────────────────────────
+  const [showDonateModal, setShowDonateModal] = useState(false);
+  const [donateAmount, setDonateAmount] = useState('20');
+  const [donateEmail, setDonateEmail] = useState('');
+  const [donateLoading, setDonateLoading] = useState(false);
   
   // History states
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
@@ -568,6 +772,10 @@ const GhanaTrotroTransit = () => {
   const destinationInputRef = useRef(null);
   const bottomSheetRef = useRef(null);
   const modalRef = useRef(null);
+  // Scrollable content area inside the profile modal (guest sign-in state) -
+  // scrolled to the bottom when "Forgot Password?" is clicked so the panel
+  // that expands below isn't cut off out of view.
+  const profileModalContentRef = useRef(null);
   const realtimeSubscriptionRef = useRef(null);
   const routesCacheRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -629,8 +837,13 @@ const GhanaTrotroTransit = () => {
     if (memoizedRouteCoordinates.length > 0) {
       return memoizedRouteCoordinates[0];
     }
+    // No route selected yet — prefer centering on the user's real position
+    // (once location permission has been granted) over the static default.
+    if (userLocation) {
+      return [userLocation.lat, userLocation.lng];
+    }
     return MAP_CONFIG.center;
-  }, [memoizedRouteCoordinates]);
+  }, [memoizedRouteCoordinates, userLocation]);
 
   // Close modals when clicking outside
   const handleOverlayClick = useCallback((e, closeFunction) => {
@@ -703,6 +916,12 @@ const GhanaTrotroTransit = () => {
 
   // Fetch user history
   const fetchUserHistory = useCallback(async (userId) => {
+    // Show the device-cached search history immediately (no DB wait), then
+    // quietly refresh from Supabase below and update the cache to match —
+    // keeps things instant on reopen while still staying in sync.
+    const cachedSearch = getCachedUserSearchHistory(userId);
+    if (cachedSearch) setSearchHistory(cachedSearch);
+
     try {
       const [createdRoutes, searchHistoryData] = await Promise.all([
         supabase.from('user_created_routes').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -710,7 +929,10 @@ const GhanaTrotroTransit = () => {
       ]);
 
       if (!createdRoutes.error) setCreatedRoutesHistory(createdRoutes.data || []);
-      if (!searchHistoryData.error) setSearchHistory(searchHistoryData.data || []);
+      if (!searchHistoryData.error) {
+        setSearchHistory(searchHistoryData.data || []);
+        setCachedUserSearchHistory(userId, searchHistoryData.data || []);
+      }
     } catch (error) {
       console.error('Error fetching user history:', error);
     }
@@ -726,15 +948,28 @@ const GhanaTrotroTransit = () => {
     }
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('search_history')
         .insert({
           user_id: user.id,
           start_point: start,
           destination: dest
-        });
-      
-      if (error) console.error('Error saving search history:', error);
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving search history:', error);
+        return;
+      }
+
+      // Mirror the new entry into the device cache so it's there instantly
+      // on next app open without waiting on a fresh DB fetch.
+      setSearchHistory((prev) => {
+        const updated = data ? [data, ...prev] : prev;
+        setCachedUserSearchHistory(user.id, updated);
+        return updated;
+      });
     } catch (error) {
       console.error('Error saving search history:', error);
     }
@@ -759,6 +994,7 @@ const GhanaTrotroTransit = () => {
       }
 
       setSearchHistory([]);
+      setCachedUserSearchHistory(user.id, []);
     } catch (error) {
       console.error('Error clearing search history:', error);
     }
@@ -783,7 +1019,11 @@ const GhanaTrotroTransit = () => {
         return;
       }
 
-      setSearchHistory(prev => prev.filter(item => item.id !== itemId));
+      setSearchHistory(prev => {
+        const updated = prev.filter(item => item.id !== itemId);
+        setCachedUserSearchHistory(user.id, updated);
+        return updated;
+      });
     } catch (error) {
       console.error('Error deleting search history item:', error);
     }
@@ -796,6 +1036,14 @@ const GhanaTrotroTransit = () => {
       return;
     }
 
+    // Device cache first — repeat lookups (retyping, or the same query on a
+    // later app open) are served without hitting the `stops` table again.
+    const cached = getCachedStopSearch(query);
+    if (cached) {
+      setSuggestions(cached);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .from('stops')
@@ -805,6 +1053,7 @@ const GhanaTrotroTransit = () => {
 
       if (!error && data) {
         setSuggestions(data);
+        setCachedStopSearch(query, data);
       } else {
         const filtered = SAMPLE_STOPS.filter(stop => 
           stop.name.toLowerCase().includes(query.toLowerCase())
@@ -921,6 +1170,7 @@ const GhanaTrotroTransit = () => {
     if (!showProfileModal) {
       setProfileView('menu');
       setNameUpdateSuccess(false);
+      setShowGuestSignIn(false);
     }
   }, [showProfileModal]);
 
@@ -996,6 +1246,193 @@ const GhanaTrotroTransit = () => {
       alert('Error: ' + error.message);
     }
   }, [user]);
+
+  // ── Volunteer mode ──────────────────────────────────────────────────────
+  const handleStartVolunteering = useCallback(() => {
+    setShowProfileModal(false);
+    setVolunteerMode(true);
+  }, []);
+
+  const handleStopVolunteering = useCallback(() => {
+    setVolunteerMode(false);
+    setShowAddStopModal(false);
+    setPendingStopCoords(null);
+  }, []);
+
+  // Called by MapComponent when the map is tapped while volunteerMode is on
+  const handleMapTap = useCallback((lat, lng) => {
+    if (!volunteerMode) return;
+    setPendingStopCoords({ lat, lng });
+    setNewStopName('');
+    setNewStopImages([]);
+    setAddStopSuccess(false);
+    setShowAddStopModal(true);
+  }, [volunteerMode]);
+
+  // Called by MapComponent when a nearby-stop dot is double-tapped —
+  // pre-fills the "start" field with that stop's name and opens the
+  // search sheet so the user can pick a destination.
+  const handleNearbyStopSelect = useCallback((name) => {
+    if (!name) return;
+    setStartPoint(name);
+    setActiveInput('start');
+    setSuggestions([]);
+    setBottomSheetContent('search');
+    setShowBottomSheet(true);
+  }, []);
+
+  const closeAddStopModal = useCallback(() => {
+    setShowAddStopModal(false);
+    setPendingStopCoords(null);
+    setNewStopName('');
+    setNewStopImages([]);
+  }, []);
+
+  const handleAddStopImagesSelected = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setNewStopImages((prev) => [...prev, ...files]);
+    e.target.value = '';
+  }, []);
+
+  const removeNewStopImage = useCallback((index) => {
+    setNewStopImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Submits a volunteer-added stop (and any photos) — unapproved until a
+  // moderator reviews it, exactly like the earner-submitted stops flow.
+  const handleSubmitNewStop = useCallback(async () => {
+    if (!pendingStopCoords || !newStopName.trim()) return;
+    setAddStopSubmitting(true);
+    try {
+      // Generate the id client-side so we can attach photos to it without
+      // needing to select the (still-unapproved) row back under RLS.
+      const newStopId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      const { error: stopError } = await supabase.from('stops').insert({
+        id: newStopId,
+        name: newStopName.trim(),
+        latitude: pendingStopCoords.lat,
+        longitude: pendingStopCoords.lng,
+        approved: false,
+      });
+      if (stopError) throw stopError;
+
+      for (const file of newStopImages) {
+        try {
+          const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+          const leaf = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const path = `${newStopId}/${leaf}.${ext}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('stop-images')
+            .upload(path, file, { contentType: file.type || 'image/jpeg' });
+          if (uploadError) throw uploadError;
+
+          const { data: publicData } = supabase.storage.from('stop-images').getPublicUrl(path);
+          await supabase.from('stop_images').insert({
+            stop_id: newStopId,
+            url: publicData?.publicUrl,
+            uploaded_by: user?.id ?? null,
+            approved: false,
+          });
+        } catch (imgErr) {
+          // One photo failing shouldn't block the stop submission itself
+          console.error('Error uploading a stop photo:', imgErr);
+        }
+      }
+
+      setAddStopSuccess(true);
+      setTimeout(() => {
+        setShowAddStopModal(false);
+        setPendingStopCoords(null);
+        setNewStopName('');
+        setNewStopImages([]);
+        setAddStopSuccess(false);
+      }, 1200);
+    } catch (error) {
+      console.error('Error adding volunteer stop:', error);
+      alert('Error: ' + (error.message || 'Could not add this stop. Please try again.'));
+    } finally {
+      setAddStopSubmitting(false);
+    }
+  }, [pendingStopCoords, newStopName, newStopImages, user]);
+
+  // ── Donate (Paystack Inline)
+  const PAYSTACK_PUBLIC_KEY = "pk_live_be7ac128a98aa85c216b52f64f1ad5523bd3193e";
+
+  const loadPaystackScript = useCallback(() => {
+    if (window.PaystackPop) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const existing = document.getElementById('paystack-inline-script');
+      if (existing) {
+        existing.addEventListener('load', resolve);
+        existing.addEventListener('error', reject);
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'paystack-inline-script';
+      script.src = 'https://js.paystack.co/v1/inline.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.body.appendChild(script);
+    });
+  }, []);
+
+  console.log('Paystack key:', PAYSTACK_PUBLIC_KEY);
+
+  const handleDonate = useCallback(async () => {
+    const amountGHS = parseFloat(donateAmount);
+    if (!amountGHS || amountGHS <= 0) {
+      alert('Please enter a valid donation amount.');
+      return;
+    }
+    const email = (donateEmail || user?.email || '').trim();
+    if (!email) {
+      alert('Please enter an email address for your receipt.');
+      return;
+    }
+
+    setDonateLoading(true);
+    try {
+      if (!PAYSTACK_PUBLIC_KEY || !PAYSTACK_PUBLIC_KEY.startsWith('pk_')) {
+        console.error(
+          'Paystack public key is missing or invalid:',
+          PAYSTACK_PUBLIC_KEY,
+          '— check your REACT_APP_PAYSTACK_PUBLIC_KEY (or VITE_ equivalent) env var, ' +
+          'that the dev server was restarted after setting it, and that it is set in your ' +
+          'deployment environment for production builds.'
+        );
+        alert('Donations are temporarily unavailable (missing payment configuration). Please try again later.');
+        setDonateLoading(false);
+        return;
+      }
+      await loadPaystackScript();
+      const handler = window.PaystackPop.setup({
+        key: PAYSTACK_PUBLIC_KEY,
+        email,
+        amount: Math.round(amountGHS * 100), // Paystack expects the smallest unit (pesewas)
+        currency: 'GHS',
+        metadata: { donation: true, user_id: user?.id ?? null },
+        callback: function (response) {
+          setDonateLoading(false);
+          setShowDonateModal(false);
+          alert('Thank you for your donation! Reference: ' + response.reference);
+          // For production, verify response.reference server-side (e.g. a
+          // Supabase Edge Function calling Paystack's verify endpoint)
+          // before treating the donation as confirmed.
+        },
+        onClose: function () {
+          setDonateLoading(false);
+        },
+      });
+      handler.openIframe();
+    } catch (error) {
+      console.error('Error starting donation checkout:', error);
+      setDonateLoading(false);
+      alert('Could not start checkout. Please check your connection and try again.');
+    }
+  }, [donateAmount, donateEmail, user, loadPaystackScript]);
 
   const handleForgotPasswordFromProfile = useCallback(async () => {
     if (!forgotPasswordEmail) {
@@ -1332,6 +1769,21 @@ const GhanaTrotroTransit = () => {
     }
   }, [startPoint, destination, selectedRoute]);
 
+  // Log a search that returned no matching routes, so we can see demand
+  // for routes that don't exist in the database yet. Best-effort — a
+  // failure here should never block the "route not found" UX.
+  const logUnmatchedSearch = useCallback(async (start, dest) => {
+    try {
+      await supabase.from('unmatched_searches').insert({
+        start_point: start,
+        destination: dest,
+        user_id: user?.id ?? null,
+      });
+    } catch (error) {
+      console.error('Error logging unmatched search:', error);
+    }
+  }, [user]);
+
   // Update the findRoutes function
   const findRoutes = useCallback(async () => {
     if (!startPoint || !destination) {
@@ -1370,6 +1822,7 @@ const GhanaTrotroTransit = () => {
       console.log('Fetched routes from database:', routesData);
 
       if (!routesData || routesData.length === 0) {
+        await logUnmatchedSearch(startPoint, destination);
         setShowRouteNotFoundModal(true);
         return;
       }
@@ -1396,6 +1849,7 @@ const GhanaTrotroTransit = () => {
       console.log('Matching routes found:', matchingRoutes.length);
 
       if (matchingRoutes.length === 0) {
+        await logUnmatchedSearch(startPoint, destination);
         setShowRouteNotFoundModal(true);
         return;
       }
@@ -1424,7 +1878,7 @@ const GhanaTrotroTransit = () => {
     } finally {
       setIsFindingRoutes(false);
     }
-  }, [user, startPoint, destination, saveSearchHistory, fetchRouteInfo]);
+  }, [user, startPoint, destination, saveSearchHistory, fetchRouteInfo, logUnmatchedSearch]);
 
   const swapLocations = useCallback(() => {
     const temp = startPoint;
@@ -2477,9 +2931,17 @@ const GhanaTrotroTransit = () => {
         center={memoizedMapCenter}
         routeCoordinates={memoizedRouteCoordinates}
         stops={memoizedStops}
+        nearbyStops={nearbyStops}
+        onNearbyStopSelect={handleNearbyStopSelect}
+        onMapMoved={handleMapViewportMoved}
         mapMode={mapMode}
         isComposite={selectedRoute?.is_composite ?? false}
         onLayerChange={setMapMode}
+        userLocation={userLocation}
+        primaryColor={COLORS.primary}
+        currentUserId={user?.id ?? null}
+        volunteerMode={volunteerMode}
+        onMapTap={handleMapTap}
       />
 
       {/* App Title in Top Left */}
@@ -2580,34 +3042,62 @@ const GhanaTrotroTransit = () => {
             <div className="ios-modal-grabber"></div>
             <div className="modal-header ios-profile-header">
               <h2 className="modal-title">Profile</h2>
-              <button 
-                className="close-button"
-                onClick={() => setShowProfileModal(false)}
-              >
-                <X size={18} strokeWidth={2.5} />
-              </button>
+              <div className="ios-profile-header-actions">
+                {!user && !showGuestSignIn && (
+                  <button
+                    className="ios-header-signin-button"
+                    onClick={() => setShowGuestSignIn(true)}
+                  >
+                    <span>SignUp</span>
+                  </button>
+                )}
+                <button 
+                  className="close-button"
+                  onClick={() => setShowProfileModal(false)}
+                >
+                  <X size={18} strokeWidth={2.5} />
+                </button>
+              </div>
             </div>
 
-            {user ? (
+            {!user && showGuestSignIn ? (
+              <div className="modal-content ios-profile-content" ref={profileModalContentRef}>
+                <AuthForm
+                  onSignIn={handleSignIn}
+                  onSignUp={handleSignUp}
+                  authLoading={authLoading}
+                  onForgotPasswordOpen={() => {
+                    // Wait a tick for the panel to actually expand so
+                    // scrollHeight reflects the new, taller content.
+                    requestAnimationFrame(() => {
+                      const el = profileModalContentRef.current;
+                      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                    });
+                  }}
+                />
+              </div>
+            ) : (
               <div className="modal-content ios-profile-content">
-                <div className="ios-user-info">
-                  <div className="ios-avatar">
-                    <span className="ios-avatar-text">
-                      {userProfile?.first_name?.[0]}{userProfile?.last_name?.[0] || user.email?.[0]?.toUpperCase()}
+                {user && (
+                  <div className="ios-user-info">
+                    <div className="ios-avatar">
+                      <span className="ios-avatar-text">
+                        {userProfile?.first_name?.[0]}{userProfile?.last_name?.[0] || user.email?.[0]?.toUpperCase()}
+                      </span>
+                    </div>
+                    <span className="ios-user-name">
+                      {userProfile?.first_name} {userProfile?.last_name}
                     </span>
+                    <span className="ios-user-email">{user.email}</span>
                   </div>
-                  <span className="ios-user-name">
-                    {userProfile?.first_name} {userProfile?.last_name}
-                  </span>
-                  <span className="ios-user-email">{user.email}</span>
-                </div>
+                )}
 
                 {profileView === 'menu' ? (
                   <>
                     <div className="ios-list-group">
                       <button
                         className="ios-list-row"
-                        onClick={handleOpenAccountView}
+                        onClick={user ? handleOpenAccountView : () => setShowGuestSignIn(true)}
                       >
                         <span className="ios-row-icon ios-row-icon--purple">
                           <User size={16} color="#FFFFFF" />
@@ -2621,6 +3111,10 @@ const GhanaTrotroTransit = () => {
                       <button 
                         className="ios-list-row"
                         onClick={() => {
+                          if (!user) {
+                            setShowGuestSignIn(true);
+                            return;
+                          }
                           setShowSearchHistoryModal(true);
                           setShowProfileModal(false);
                         }}
@@ -2666,13 +3160,45 @@ const GhanaTrotroTransit = () => {
                     </div>
 
                     <div className="ios-list-group">
-                      <button 
-                        className="ios-list-row ios-list-row--destructive"
-                        onClick={handleSignOut}
+                      <button
+                        className="ios-list-row"
+                        onClick={handleStartVolunteering}
                       >
-                        <span className="ios-row-text ios-row-text--destructive">Sign Out</span>
+                        <span className="ios-row-icon ios-row-icon--teal">
+                          <Users size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Add a Stop</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+
+                      <div className="ios-list-divider"></div>
+
+                      <button
+                        className="ios-list-row"
+                        onClick={() => {
+                          setShowProfileModal(false);
+                          setDonateEmail(user?.email || '');
+                          setShowDonateModal(true);
+                        }}
+                      >
+                        <span className="ios-row-icon ios-row-icon--red">
+                          <Heart size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Buy Me Waakye</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
                       </button>
                     </div>
+
+                    {user && (
+                      <div className="ios-list-group">
+                        <button 
+                          className="ios-list-row ios-list-row--destructive"
+                          onClick={handleSignOut}
+                        >
+                          <span className="ios-row-text ios-row-text--destructive">Sign Out</span>
+                        </button>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="ios-account-view">
@@ -2734,10 +3260,6 @@ const GhanaTrotroTransit = () => {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="modal-content ios-profile-content">
-                <AuthForm onSignIn={handleSignIn} onSignUp={handleSignUp} authLoading={authLoading} />
-              </div>
             )}
                     <p className="ios-version-text">Version: aaya!</p>
 
@@ -2792,6 +3314,165 @@ const GhanaTrotroTransit = () => {
           <div className="sign-out-loading-content">
             <div className="loading-spinner"></div>
             <p className="sign-out-loading-text">Deleting account...</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Volunteer mode banner ── */}
+      {volunteerMode && !showAddStopModal && (
+        <div className="volunteer-mode-banner">
+          <div className="volunteer-mode-banner-text">
+            <MapPin size={16} color="#FFFFFF" />
+            <span>Tap anywhere on the map to add a stop</span>
+          </div>
+          <button className="volunteer-mode-done-button" onClick={handleStopVolunteering}>
+            Done
+          </button>
+        </div>
+      )}
+
+      {/* ── Add Stop Modal (volunteer mode) ── */}
+      {showAddStopModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget && !addStopSubmitting) closeAddStopModal(); }}
+        >
+          <div className="modal add-stop-modal">
+            {addStopSuccess ? (
+              <div className="report-success">
+                <div className="report-success-icon">
+                  <Check size={32} color="#10B981" />
+                </div>
+                <h3 className="report-success-title">Stop Submitted!</h3>
+                <p className="report-success-msg">
+                  Thanks for helping map Ghana&apos;s trotro network. This stop will appear on the map once it&apos;s verified.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="modal-header">
+                  <h2 className="modal-title">Add a Stop</h2>
+                  <button className="close-button" onClick={closeAddStopModal} disabled={addStopSubmitting}>
+                    <X size={18} strokeWidth={2.5} />
+                  </button>
+                </div>
+
+                <div className="modal-content">
+                  {pendingStopCoords && (
+                    <p className="add-stop-coords">
+                      {pendingStopCoords.lat.toFixed(5)}, {pendingStopCoords.lng.toFixed(5)}
+                    </p>
+                  )}
+
+                  <p className="report-section-label">Stop name *</p>
+                  <input
+                    className="ios-form-input add-stop-name-input"
+                    placeholder="e.g. Achimota Market"
+                    value={newStopName}
+                    onChange={(e) => setNewStopName(e.target.value)}
+                    maxLength={100}
+                  />
+
+                  <p className="report-section-label">Photos (optional)</p>
+                  <div className="add-stop-photos-grid">
+                    {newStopImages.map((file, i) => (
+                      <div className="add-stop-photo-thumb" key={i}>
+                        <img src={URL.createObjectURL(file)} alt={`Stop photo ${i + 1}`} />
+                        <button
+                          type="button"
+                          className="add-stop-photo-remove"
+                          onClick={() => removeNewStopImage(i)}
+                        >
+                          <X size={12} strokeWidth={3} />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="add-stop-photo-add">
+                      <ImagePlus size={20} color={COLORS.primary} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={handleAddStopImagesSelected}
+                      />
+                    </label>
+                  </div>
+                  <p className="add-stop-photos-hint">
+                    Photos help other users recognize the stop. They&apos;ll be visible once approved.
+                  </p>
+
+                  <button
+                    className={`report-submit-button${(!newStopName.trim() || addStopSubmitting) ? ' report-submit-disabled' : ''}`}
+                    onClick={handleSubmitNewStop}
+                    disabled={!newStopName.trim() || addStopSubmitting}
+                  >
+                    {addStopSubmitting ? 'Submitting...' : 'Submit Stop'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Donate Modal (Paystack) ── */}
+      {showDonateModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget && !donateLoading) setShowDonateModal(false); }}
+        >
+          <div className="modal donate-modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Support Ghana Trotro Transit</h2>
+              <button className="close-button" onClick={() => setShowDonateModal(false)} disabled={donateLoading}>
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content">
+              <p className="donate-intro">
+                Donations help keep the app free, fund new stop verification, and support the volunteers mapping Ghana&apos;s trotro routes.
+              </p>
+
+              <p className="report-section-label">Amount (GH&#8373;)</p>
+              <div className="donate-amount-chips">
+                {['5', '20', '50', '100'].map((amt) => (
+                  <button
+                    key={amt}
+                    className={`donate-amount-chip${donateAmount === amt ? ' donate-amount-chip-selected' : ''}`}
+                    onClick={() => setDonateAmount(amt)}
+                  >
+                    GH&#8373;{amt}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="ios-form-input donate-amount-input"
+                type="number"
+                min="1"
+                placeholder="Custom amount"
+                value={donateAmount}
+                onChange={(e) => setDonateAmount(e.target.value)}
+              />
+
+              <p className="report-section-label">Email (for your receipt)</p>
+              <input
+                className="ios-form-input"
+                type="email"
+                placeholder="you@example.com"
+                value={donateEmail}
+                onChange={(e) => setDonateEmail(e.target.value)}
+              />
+
+              <button
+                className={`report-submit-button${donateLoading ? ' report-submit-disabled' : ''}`}
+                onClick={handleDonate}
+                disabled={donateLoading}
+              >
+                {donateLoading ? 'Processing...' : 'Buy the waakye with Paystack'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3041,6 +3722,15 @@ const GhanaTrotroTransit = () => {
           <div className="modal ios-history-modal" ref={modalRef}>
             <div className="ios-modal-grabber"></div>
             <div className="modal-header ios-history-header">
+              <button
+                className="ios-modal-back-button"
+                onClick={() => {
+                  setShowSearchHistoryModal(false);
+                  setShowProfileModal(true);
+                }}
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
               <h2 className="modal-title">Search History</h2>
               <button 
                 className="close-button"
@@ -3343,7 +4033,7 @@ const GhanaTrotroTransit = () => {
         <div className="cookie-consent-overlay">
           <div className="cookie-consent-banner">
             <p className="cookie-consent-text">
-              We use cookies to keep Ghana Trotro Transit working smoothly, including saving your search history and preferences on this device. You need to agree to continue using the app.
+              We use cookies and your device location to keep Ghana Trotro Transit working smoothly — including saving your search history, showing your position on the map, and improving route suggestions near you. You need to agree to continue using the app.
             </p>
             <div className="cookie-consent-actions">
               <button
@@ -3414,6 +4104,12 @@ const GhanaTrotroTransit = () => {
                       <Map size={16} color={COLORS.primary} />
                     </div>
                     <span className="feature-text">Storing basic preferences, like your last selected map layer</span>
+                  </div>
+                  <div className="feature-item">
+                    <div className="feature-icon">
+                      <Navigation size={16} color={COLORS.primary} />
+                    </div>
+                    <span className="feature-text">Showing your current location on the map, and saving it to your account (if signed in) to improve nearby route suggestions</span>
                   </div>
                 </div>
                 <p className="info-text">
