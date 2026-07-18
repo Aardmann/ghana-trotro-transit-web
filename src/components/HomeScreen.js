@@ -383,12 +383,17 @@ const fetchCompositeSegments = async (routeId) => {
       distance:     subRoute.total_distance,
       fromName:     firstStop?.name ?? '',
       toName:       lastStop?.name  ?? '',
+      // Vehicle type used for this leg's boundary stops — shown as a tag
+      // next to the stop name in the stops list.
+      fromVehicleType: firstStop?.vehicle_type ?? null,
+      toVehicleType:   lastStop?.vehicle_type  ?? null,
       // All coordinates for this sub-route (used to build the map path)
       allCoords: sorted.map(rs => ({
         id:   rs.stops.id,
         name: rs.stops.name,
         lat:  parseFloat(rs.stops.latitude),
         lng:  parseFloat(rs.stops.longitude),
+        vehicle_type: rs.stops.vehicle_type ?? null,
       })),
     };
   }).filter(Boolean);
@@ -432,6 +437,7 @@ const fetchCompositeSegments = async (routeId) => {
         lat:         c.lat,
         lng:         c.lng,
         fare_to_next,
+        vehicle_type: c.vehicle_type ?? null,
         // Transfer marker only at boundaries between two non-walk sub-routes
         isTransfer:  isJunction && !isWalkSeg && !prevIsWalk,
       });
@@ -476,6 +482,7 @@ const formatRoute = async (route) => {
       lng:              parseFloat(rs.stops.longitude),
       fare_to_next:     rs.fare_to_next,
       distance_to_next: rs.distance_to_next,
+      vehicle_type:     rs.stops.vehicle_type ?? null,
     })),
   };
 };
@@ -525,6 +532,14 @@ const GhanaTrotroTransit = () => {
   // Bumped to tell MapComponent to fly the map to fit the current route.
   const [recenterRouteTrigger, setRecenterRouteTrigger] = useState(0);
   const locationRequestedRef = useRef(false);
+  // Whether enough time has passed since asking for location that, if the
+  // marker still isn't showing, we can nudge the user to enable it. Delayed
+  // so the banner doesn't flash on screen while the browser's own
+  // permission prompt (or a slow GPS fix) is still pending.
+  const [locationPromptEligible, setLocationPromptEligible] = useState(false);
+  // Session-only — once the user closes the nudge, don't show it again
+  // for the rest of this visit.
+  const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
 
   // ── Nearby stops (faint reference dots around the user) ─────────────
   // Fetched once per location (device-cached — see fetchNearbyStops below)
@@ -561,7 +576,7 @@ const GhanaTrotroTransit = () => {
 
       const { data, error } = await supabase
         .from('stops')
-        .select('id, name, latitude, longitude')
+        .select('id, name, latitude, longitude, vehicle_type')
         .eq('approved', true)
         .gte('latitude', coords.lat - latDelta)
         .lte('latitude', coords.lat + latDelta)
@@ -576,6 +591,7 @@ const GhanaTrotroTransit = () => {
           name: s.name,
           lat: parseFloat(s.latitude),
           lng: parseFloat(s.longitude),
+          vehicle_type: s.vehicle_type ?? null,
         }))
         .filter((s) => haversineKm(coords.lat, coords.lng, s.lat, s.lng) <= NEARBY_RADIUS_KM);
 
@@ -718,6 +734,25 @@ const GhanaTrotroTransit = () => {
       requestUserLocation();
     }
   }, [cookiesAccepted, requestUserLocation]);
+
+  // Give the browser's own permission prompt (or a slow GPS fix) a few
+  // seconds before considering the nudge banner eligible to show — avoids
+  // a flash of "enable location" the instant the page loads.
+  useEffect(() => {
+    if (!cookiesAccepted) return;
+    const timer = setTimeout(() => setLocationPromptEligible(true), 4000);
+    return () => clearTimeout(timer);
+  }, [cookiesAccepted]);
+
+  // Shown whenever the user's location marker still isn't on the map after
+  // that grace period — i.e. permission was never granted, was denied, or
+  // geolocation isn't available — encouraging them to turn it on.
+  const showLocationPermissionBanner =
+    cookiesAccepted && locationPromptEligible && !userLocation && !locationBannerDismissed;
+
+  const handleEnableLocation = useCallback(() => {
+    requestUserLocation();
+  }, [requestUserLocation]);
 
   // The very first time a location fix comes in during this session (and
   // no route is on screen yet, so there's nothing else the view needs to
@@ -1316,6 +1351,13 @@ const GhanaTrotroTransit = () => {
     setVolunteerMode(false);
     setShowAddStopModal(false);
     setPendingStopCoords(null);
+  }, []);
+
+  // Lets someone jump straight from "we don't have this route yet" into
+  // volunteer mode, so they can drop the missing stops on the map themselves.
+  const handleAddStopsFromRouteNotFound = useCallback(() => {
+    setShowRouteNotFoundModal(false);
+    setVolunteerMode(true);
   }, []);
 
   // Called by MapComponent when the map is tapped while volunteerMode is on
@@ -2602,12 +2644,13 @@ const GhanaTrotroTransit = () => {
                 ? (() => {
                     const segs = selectedRoute.compositionSegments;
                     const displayNodes = [
-                      { name: segs[0].fromName, nextSeg: segs[0] },
+                      { name: segs[0].fromName, vehicleType: segs[0].fromVehicleType, nextSeg: segs[0] },
                       ...segs.slice(0, -1).map((seg, i) => ({
                         name:    seg.toName,         // = segs[i+1].fromName
+                        vehicleType: seg.toVehicleType,
                         nextSeg: segs[i + 1],
                       })),
-                      { name: segs[segs.length - 1].toName, nextSeg: null },
+                      { name: segs[segs.length - 1].toName, vehicleType: segs[segs.length - 1].toVehicleType, nextSeg: null },
                     ];
 
                     return displayNodes.map((node, index) => {
@@ -2635,6 +2678,12 @@ const GhanaTrotroTransit = () => {
                                 <span className={`stop-tag ${isFirst ? 'stop-tag--start' : isLast ? 'stop-tag--end' : 'stop-tag--mid'}`}>
                                   {isFirst ? 'Start' : isLast ? 'Destination' : `Stop ${index}`}
                                 </span>
+                                {node.vehicleType && (
+                                  <span className="stop-vehicle-tag">
+                                    <Bus size={11} />
+                                    {node.vehicleType}
+                                  </span>
+                                )}
                               </div>
                               {/* Fare / Walk pill for the leg leaving this stop */}
                               {!isLast && seg && (
@@ -2711,6 +2760,12 @@ const GhanaTrotroTransit = () => {
                           )}
                         </div>
                         <span className="stop-card-name">{stop.name}</span>
+                        {stop.vehicle_type && (
+                          <span className="stop-vehicle-tag">
+                            <Bus size={11} />
+                            {stop.vehicle_type}
+                          </span>
+                        )}
                         {stop.distance_to_next && (
                           <div className="stop-card-meta">
                             <span className="stop-meta-dot" />
@@ -2757,9 +2812,6 @@ const GhanaTrotroTransit = () => {
           </p>
         </div>
         <div className="header-buttons">
-          <div className="realtime-status">
-            <div className={`status-indicator ${isRealtimeConnected ? 'connected' : 'disconnected'}`} />
-          </div>
           <button 
             className="info-toggle-button"
             onClick={toggleBottomSheetContent}
@@ -3031,6 +3083,31 @@ const GhanaTrotroTransit = () => {
         <h4>Ghana Trotro Transit</h4>
       </div>
 
+      {/* Location Permission Nudge — shown when the user's location marker
+          still isn't on the map (never granted, denied, or unavailable),
+          encouraging them to turn it on for a better experience. */}
+      {showLocationPermissionBanner && (
+        <div className="location-permission-banner">
+          <MapPin size={18} color={COLORS.primary} />
+          <p className="location-permission-text">
+            Turn on location for a better experience — see your position and nearby stops on the map.
+          </p>
+          <button
+            className="location-permission-enable-button"
+            onClick={handleEnableLocation}
+          >
+            Enable
+          </button>
+          <button
+            className="location-permission-dismiss-button"
+            onClick={() => setLocationBannerDismissed(true)}
+            aria-label="Dismiss"
+          >
+            <X size={16} strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
+
       {/* Top Right Buttons */}
       <button
         className="profile-button"
@@ -3053,7 +3130,7 @@ const GhanaTrotroTransit = () => {
         onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
         aria-label="Get the app"
       >
-        <svg fill="var(--primary-color)" width="400px" height="400px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
+        <svg fill="var(--primary-color)" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
       </button>
 
       {/* Stacked bottom-right action buttons. These sit in a single flex
@@ -3991,7 +4068,7 @@ const GhanaTrotroTransit = () => {
                 This route may not be available in our database yet.
               </p>
               <p className="route-not-found-msg">
-                Visit the link below to see all the routes we currently support.
+                You can add the stops for this route and it'll route will be created.
               </p>
               <a
                 href="https://gtt.nxnx.tech/routes-you-can-find.html"
@@ -4002,6 +4079,13 @@ const GhanaTrotroTransit = () => {
                 <Globe size={18} color="#FFFFFF" />
                 <span>See Available Routes</span>
               </a>
+              <button
+                className="route-not-found-volunteer-button"
+                onClick={handleAddStopsFromRouteNotFound}
+              >
+                <MapPin size={18} color={COLORS.primary} />
+                <span>Add the Stops</span>
+              </button>
               <button
                 className="route-not-found-close-button"
                 onClick={() => setShowRouteNotFoundModal(false)}

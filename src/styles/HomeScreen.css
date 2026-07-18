@@ -70,8 +70,8 @@ body {
   right: 20px;
   width: 48px;
   height: 48px;
-  padding-left: 10px;
-  padding-top: 9px;
+  padding-left: 8px;
+  padding-top: 8px;
   background-color: #ffffff;
   border: none;
   border-radius: 50%;
@@ -86,6 +86,7 @@ body {
 
 .get-app-button:hover {
   transform: scale(1.05);
+  background-color: #f3f4f6;
 }
 
 /* ── Bottom-right action button stack ─────────────────────────────────
@@ -215,6 +216,79 @@ body {
 @media (max-width: 1023px) {
   .app-title-top-left {
     display: none;
+  }
+}
+
+/* ── Location permission nudge banner ─────────────────────────────────
+   A slim, dismissible bar near the top of the screen encouraging the
+   user to enable location when their marker isn't showing on the map. */
+.location-permission-banner {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+  width: calc(100% - 40px);
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 12px 12px 12px 16px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+  border-left: 4px solid var(--primary-color);
+}
+
+.location-permission-text {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-color);
+}
+
+.location-permission-enable-button {
+  flex-shrink: 0;
+  border: none;
+  background: var(--primary-color);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.location-permission-enable-button:hover {
+  background: #8b5cf6;
+}
+
+.location-permission-dismiss-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #9CA3AF;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+.location-permission-dismiss-button:hover {
+  color: #6B7280;
+}
+
+@media (max-width: 640px) {
+  .location-permission-banner {
+    top: 16px;
+    padding: 10px 10px 10px 14px;
+  }
+
+  .location-permission-text {
+    font-size: 12.5px;
   }
 }
 
@@ -387,7 +461,7 @@ body {
 .input-clear-btn {
   background: none;
   border: none;
-  padding: 2px 2px;
+  padding: 2px 4px;
   cursor: pointer;
   color: var(--text-light);
   display: flex;
@@ -1450,6 +1524,28 @@ body {
   font-weight: 600;
 }
 
+.route-not-found-volunteer-button {
+  margin-top: 10px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 26px;
+  border: 1.5px solid var(--primary-color);
+  background: #fff;
+  color: var(--primary-color);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background-color 0.2s ease;
+}
+
+.route-not-found-volunteer-button:hover {
+  background: rgba(107, 33, 168, 0.06);
+}
+
 .route-not-found-close-button {
   margin-top: 10px;
   width: 100%;
@@ -2337,7 +2433,6 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  width: 100%;
   background: rgba(107, 33, 168, 0.06);
   border: none;
   border-radius: 16px;
@@ -3064,12 +3159,6 @@ body {
   margin: 20px 0;
 }
 
-@media (min-width: 768px) {
-  .info-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
 .info-column {
   display: flex;
   flex-direction: column;
@@ -3121,12 +3210,6 @@ body {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
-}
-
-@media (min-width: 480px) {
-  .info-grid-small {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 .amenities-list {
@@ -3273,7 +3356,7 @@ body {
 }
 
 .info-toggle-button:hover {
-  background: rgba(107, 33, 168, 0.18);
+  background-color: rgba(107, 33, 168, 0.1);
   transform: scale(1.05);
 }
 
@@ -3286,25 +3369,6 @@ body {
   display: flex;
   justify-content: center;
   z-index: 10;
-}
-
-.swipe-indicator-button {
-  background: rgba(59, 130, 246, 0.9);
-  color: white;
-  border: none;
-  border-radius: 26px;
-  padding: 8px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  transition: background-color 0.2s;
-}
-
-.swipe-indicator-button:hover {
-  background: rgba(59, 130, 246, 1);
 }
 
 /* Route info specific styles */
@@ -3333,7 +3397,7 @@ body {
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -4191,7 +4255,7 @@ body, #root {
 }
 
 .stop-card-label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
 }
 
@@ -4243,6 +4307,20 @@ body, #root {
   font-weight: 650;
   color: var(--text-color);
   line-height: 1.3;
+}
+
+.stop-vehicle-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #000000;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 3px 9px 3px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
 }
 
 .stop-card-meta {
@@ -4892,6 +4970,7 @@ body, #root {
 .forgot-password-send-btn,
 .forgot-password-done-btn,
 .route-not-found-link-button,
+.route-not-found-volunteer-button,
 .route-not-found-close-button,
 .sign-out-confirm-button,
 .sign-out-cancel-button,
@@ -5584,12 +5663,14 @@ body, #root {
 }
 
 .route-details .stop-card-name {
-  font-size: 14.5px;
+  font-size: 13px;
   font-weight: 700;
   color: #0B0B0F;
   line-height: 1.3;
 }
-
+.stop-node .stop-node--end svg{
+  margin-left: -5px;
+}
 .route-details .stop-card-meta {
   display: flex;
   align-items: center;
