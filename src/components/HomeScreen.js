@@ -3504,7 +3504,7 @@ const GhanaTrotroTransit = () => {
         onClick={openExploreDrawer}
         aria-label="Explore routes and nearby stops"
       >
-        <Menu size={20} color="#8b5cf6" />
+        <Menu size={20} color="#ffffff" />
       </button>
 
       <button

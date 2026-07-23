@@ -40,7 +40,8 @@ const MapComponent = React.memo(({
   const hasSeenMapRef = useRef(hasSeenMapBefore());
 
   // ── Stop photos ───────────────────────────────────────────────────────────
-  // Keyed by stop id → array of { id, url, approved, mine }. Only approved
+  // Keyed by stop id → array of { id, url, approved, mine }. Covers both the
+  // route's own stops and the nearby (black dot) stops. Only approved
   // images (or the current user's own pending uploads) ever land in here —
   // unapproved photos from other users are never fetched into this map.
   const [stopImagesByStop, setStopImagesByStop] = useState({});
@@ -89,12 +90,17 @@ const MapComponent = React.memo(({
     } catch (e) {}
   }, []);
 
-  // Load approved (+ own pending) photos for the stops currently on screen
+  // Load approved (+ own pending) photos for the stops currently on screen —
+  // both the route's own stops and the nearby (black dot) stops, so the
+  // nearby dots can show a photo thumbnail wherever one is available.
   useEffect(() => {
     let cancelled = false;
 
     const loadImages = async () => {
-      const stopIds = (stops || []).map((s) => s.id).filter(Boolean);
+      const idSet = new Set();
+      (stops || []).forEach((s) => { if (s.id) idSet.add(s.id); });
+      (nearbyStops || []).forEach((s) => { if (s.id) idSet.add(s.id); });
+      const stopIds = Array.from(idSet);
       if (stopIds.length === 0) {
         setStopImagesByStop({});
         return;
@@ -162,7 +168,8 @@ const MapComponent = React.memo(({
 
     loadImages();
     return () => { cancelled = true; };
-  }, [stops, currentUserId, syncStopImages]);
+  }, [stops, nearbyStops, currentUserId, syncStopImages]);
+
 
   // Whenever React's userLocation changes (a fresh GPS fix, permission
   // newly granted, etc.), push it into the already-running map instead of
@@ -448,6 +455,20 @@ const MapComponent = React.memo(({
     .nearby-stop-popup.maplibregl-popup-anchor-top    .maplibregl-popup-tip{border-bottom-color:rgba(0,0,0,0.7) !important;}
     .nearby-stop-popup.maplibregl-popup-anchor-left   .maplibregl-popup-tip{border-right-color:rgba(0,0,0,0.7) !important;}
     .nearby-stop-popup.maplibregl-popup-anchor-right  .maplibregl-popup-tip{border-left-color:rgba(0,0,0,0.7) !important;}
+
+    /* ── Nearby-stop dot — solid black by default; becomes a small round
+       photo thumbnail once the stop has an approved photo ── */
+    .nearby-stop-dot{
+      width:11px;height:11px;border-radius:50%;
+      background-color:#000;background-position:center;background-size:cover;background-repeat:no-repeat;
+      box-shadow:0 0 0 1.5px rgba(255,255,255,0.6),0 1px 4px rgba(0,0,0,0.4);
+      cursor:pointer;touch-action:none;
+      transition:opacity 0.35s ease-out,width 0.2s ease,height 0.2s ease;
+    }
+    .nearby-stop-dot--photo{
+      width:22px;height:22px;
+      box-shadow:0 0 0 2px rgba(255,255,255,0.85),0 2px 6px rgba(0,0,0,0.45);
+    }
 
     /* ── Toast — brief confirmation banner (e.g. photo upload success) ── */
     .map-toast{
@@ -1116,14 +1137,10 @@ function updateNearbyStopVisibility() {
 
 function createNearbyStopMarker(stop) {
   var el = document.createElement('div');
-  el.style.cssText =
-    'width:11px;height:11px;border-radius:50%;' +
-    'background:#000;' +
-    'box-shadow:0 0 0 1.5px rgba(255,255,255,0.6),0 1px 4px rgba(0,0,0,0.4);' +
-    'cursor:pointer;touch-action:none;';
+  el.className = 'nearby-stop-dot';
+  applyNearbyStopVisual(el, stop);
   // Newly-spawned dots ease in/out rather than popping.
   el.style.opacity = '0';
-  el.style.transition = 'opacity 0.35s ease-out';
 
   var popup = new maplibregl.Popup({
     offset: 12,
@@ -1180,9 +1197,11 @@ function createNearbyStopMarker(stop) {
     var now = Date.now();
 
     if (now - lastTapAt < DOUBLE_TAP_MS) {
-      // Second tap within the window — treat as a double tap/click.
+      // Second tap within the window — treat as a double tap/click. This
+      // still pre-fills the start field whether or not the dot has a photo.
       lastTapAt = 0;
       popup.remove();
+      closeLightbox();
       try {
         window.parent.postMessage(
           { type: 'NEARBY_STOP_DBLTAP', name: stop.name, lat: stop.lat, lng: stop.lng, id: stop.id ?? null },
@@ -1193,6 +1212,15 @@ function createNearbyStopMarker(stop) {
     }
 
     lastTapAt = now;
+
+    // A dot with an approved photo opens straight to the full-size photo
+    // on tap, instead of the name popup - double-tap still fills the form.
+    var approved = approvedImagesForStop(stop.id);
+    if (approved.length > 0) {
+      openLightbox(stop);
+      return;
+    }
+
     if (popup.isOpen()) {
       popup.remove();
     } else {
@@ -1218,6 +1246,30 @@ function createNearbyStopMarker(stop) {
 
   // Desktop mouse clicks (no preceding touch) still go through here.
   el.addEventListener('click', handleTap);
+}
+
+// Sets a nearby-stop dot's visual to a small round photo thumbnail once the
+// stop has an approved photo, or back to a plain black dot otherwise. Used
+// both when a dot is first created and whenever fresh photo data comes in
+// (see refreshNearbyStopVisuals), so existing dots update in place instead
+// of being torn down and recreated.
+function applyNearbyStopVisual(el, stop) {
+  var approved = approvedImagesForStop(stop.id);
+  if (approved.length > 0) {
+    el.classList.add('nearby-stop-dot--photo');
+    el.style.backgroundImage = "url('" + approved[0].url + "')";
+  } else {
+    el.classList.remove('nearby-stop-dot--photo');
+    el.style.backgroundImage = '';
+  }
+}
+
+// Called whenever a fresh STOP_IMAGES_SYNC comes in from React, so nearby
+// dots that just gained (or lost) an approved photo update in place.
+function refreshNearbyStopVisuals() {
+  nearbyMarkerEntries.forEach(function(entry) {
+    applyNearbyStopVisual(entry.el, entry.stop);
+  });
 }
 
 // Spawns markers only for stops not already on the map — used for both the
@@ -1408,6 +1460,14 @@ document.getElementById('stopPhotoInput').addEventListener('change', function(e)
 });
 
 // ── Full-size photo lightbox ────────────────────────────────────────────────
+// Tracks the currently-open lightbox's close function (if any), so other
+// gestures - like double-tapping a nearby-stop dot to pre-fill the start
+// field - can dismiss it instead of leaving it lingering over the map.
+var activeLightboxClose = null;
+function closeLightbox() {
+  if (activeLightboxClose) activeLightboxClose();
+}
+
 function openLightbox(stop) {
   var images = approvedImagesForStop(stop.id);
   if (images.length === 0) return;
@@ -1453,7 +1513,9 @@ function openLightbox(stop) {
   }
   function close() {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    if (activeLightboxClose === close) activeLightboxClose = null;
   }
+  activeLightboxClose = close;
 
   render();
   document.body.appendChild(overlay);
@@ -1479,6 +1541,7 @@ window.addEventListener('message', function(e) {
   if (e.data.type === 'STOP_IMAGES_SYNC') {
     stopImagesMap = e.data.images || {};
     drawStopPhotoBadges();
+    refreshNearbyStopVisuals();
   }
   if (e.data.type === 'NEARBY_STOPS_ADD') {
     addNearbyStopsIncremental(e.data.stops || []);
