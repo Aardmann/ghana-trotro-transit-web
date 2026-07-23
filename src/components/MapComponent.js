@@ -309,7 +309,7 @@ const MapComponent = React.memo(({
         onMapTap(e.data.lat, e.data.lng);
       }
       if (e.data?.type === 'NEARBY_STOP_DBLTAP' && onNearbyStopSelect) {
-        onNearbyStopSelect(e.data.name, e.data.lat, e.data.lng);
+        onNearbyStopSelect(e.data.name, e.data.lat, e.data.lng, e.data.id);
       }
       if (e.data?.type === 'MAP_MOVED' && onMapMoved) {
         onMapMoved(e.data.lat, e.data.lng, e.data.bounds);
@@ -421,6 +421,12 @@ const MapComponent = React.memo(({
       padding:9px 13px;box-shadow:0 4px 16px rgba(0,0,0,0.3);
       min-width:0;max-width:220px;
     }
+    .nearby-stop-popup-row{
+      display:flex;align-items:center;gap:10px;
+    }
+    .nearby-stop-popup-text{
+      flex:1;min-width:0;
+    }
     .nearby-stop-popup-name{
       font-family:-apple-system,BlinkMacSystemFont,sans-serif;
       font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;
@@ -428,6 +434,15 @@ const MapComponent = React.memo(({
     .nearby-stop-popup-hint{
       font-family:-apple-system,BlinkMacSystemFont,sans-serif;
       font-size:11px;font-weight:500;color:rgba(255,255,255,0.85);
+    }
+    .nearby-stop-popup-add-photo{
+      flex-shrink:0;width:22px;height:22px;border-radius:50%;
+      background:rgba(255,255,255,0.22);border:1.5px solid rgba(255,255,255,0.6);
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;
+    }
+    .nearby-stop-popup-add-photo:active{
+      background:rgba(255,255,255,0.35);
     }
     .nearby-stop-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip{border-top-color:rgba(0,0,0,0.7) !important;}
     .nearby-stop-popup.maplibregl-popup-anchor-top    .maplibregl-popup-tip{border-bottom-color:rgba(0,0,0,0.7) !important;}
@@ -458,7 +473,7 @@ const MapComponent = React.memo(({
 
     /* ── Stop photo badge — small square "pin" pointing at each stop ── */
     .stop-photo-badge{
-      width:34px;height:34px;border-radius:9px;
+      width:34px;height:34px;border-radius:50%;
       background-color:#fff;background-position:center;background-size:cover;background-repeat:no-repeat;
       border:1.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);
       cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -1116,9 +1131,39 @@ function createNearbyStopMarker(stop) {
     closeOnClick: false,
     className: 'nearby-stop-popup'
   }).setHTML(
-    '<div class="nearby-stop-popup-name">' + (stop.name || 'Stop') + '</div>' +
-    '<div class="nearby-stop-popup-hint">Double tap marker to start with this location</div>'
+    '<div class="nearby-stop-popup-row">' +
+      '<div class="nearby-stop-popup-text">' +
+        '<div class="nearby-stop-popup-name">' + (stop.name || 'Stop') + '</div>' +
+        '<div class="nearby-stop-popup-hint">Double tap marker to start with this location</div>' +
+      '</div>' +
+      (stop.id
+        ? '<button type="button" class="nearby-stop-popup-add-photo" aria-label="Add a photo of this stop">' +
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>' +
+          '</button>'
+        : '') +
+    '</div>'
   );
+
+  // The popup's DOM only exists once it's been added to the map, so the
+  // add-photo button is wired up on 'open' rather than right after setHTML.
+  popup.on('open', function() {
+    var container = popup.getElement && popup.getElement();
+    if (!container) return;
+    var btn = container.querySelector('.nearby-stop-popup-add-photo');
+    if (!btn || !stop.id || btn.dataset.wired) return;
+    btn.dataset.wired = '1';
+
+    function openPicker(e) {
+      if (e) { e.stopPropagation(); if (e.cancelable) e.preventDefault(); }
+      popup.remove();
+      triggerFileInput(stop.id);
+    }
+    // Same touch-vs-click handling as the marker itself, so a tap on the
+    // button never falls through to the map/marker's own tap handling.
+    btn.addEventListener('touchstart', function(e) { e.stopPropagation(); }, { passive: true });
+    btn.addEventListener('touchend', openPicker, { passive: false });
+    btn.addEventListener('click', openPicker);
+  });
 
   var m = new maplibregl.Marker({ element: el })
     .setLngLat([stop.lng, stop.lat])
@@ -1140,7 +1185,7 @@ function createNearbyStopMarker(stop) {
       popup.remove();
       try {
         window.parent.postMessage(
-          { type: 'NEARBY_STOP_DBLTAP', name: stop.name, lat: stop.lat, lng: stop.lng },
+          { type: 'NEARBY_STOP_DBLTAP', name: stop.name, lat: stop.lat, lng: stop.lng, id: stop.id ?? null },
           '*'
         );
       } catch (err) {}

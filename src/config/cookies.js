@@ -422,4 +422,43 @@ export const markMapSeenBefore = () => {
   writeLocalJSON(MAP_SEEN_BEFORE_KEY, { seenAt: Date.now() });
 };
 
+// ── Explore-drawer routes cache ─────────────────────────────────────────
+// The Explore drawer (Popular Routes / Routes Around You / Locations
+// Nearby) is all built from one batch of routes pulled from the `routes`
+// table. That batch is mirrored here so reopening the drawer, or reloading
+// the app entirely, doesn't have to re-run the join-heavy routes query
+// every time. Unlike the other device caches in this file, freshness isn't
+// left to the TTL alone - HomeScreen's realtime subscription calls
+// clearCachedExploreRoutes() the moment the `routes`, `route_stops`, or
+// `stops` tables change in the DB, so a newly-added route or stop shows up
+// next time the drawer opens instead of waiting out the full cache window.
+// The TTL below is just a safety net in case a realtime event is ever missed.
+const EXPLORE_ROUTES_CACHE_KEY = 'gtt_explore_routes_cache';
+const EXPLORE_ROUTES_CACHE_TTL_MS = CACHE_TTL_MS;
+
+export const getCachedExploreRoutes = () => {
+  const cached = readLocalJSON(EXPLORE_ROUTES_CACHE_KEY);
+  if (!cached || !Array.isArray(cached.routes)) return null;
+
+  const age = Date.now() - (cached.cachedAt || 0);
+  if (age > EXPLORE_ROUTES_CACHE_TTL_MS) return null;
+
+  return cached.routes;
+};
+
+export const setCachedExploreRoutes = (routes) => {
+  if (!Array.isArray(routes)) return;
+  writeLocalJSON(EXPLORE_ROUTES_CACHE_KEY, { routes, cachedAt: Date.now() });
+};
+
+// Called whenever the routes/stops data backing the Explore drawer has
+// changed in the DB, so the next fetch skips the stale local copy.
+export const clearCachedExploreRoutes = () => {
+  try {
+    localStorage.removeItem(EXPLORE_ROUTES_CACHE_KEY);
+  } catch (error) {
+    console.error('Error clearing explore-routes cache:', error);
+  }
+};
+
 export { haversineKm, NEARBY_RADIUS_KM, NEARBY_CACHE_MOVE_THRESHOLD_KM };

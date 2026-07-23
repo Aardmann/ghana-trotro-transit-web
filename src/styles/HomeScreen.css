@@ -29,7 +29,7 @@ body {
 }
 
 /* Button styles */
-.profile-button, .plus-button, .info-button, .floating-button {
+.profile-button, .plus-button, .hamburger-button, .info-button, .floating-button {
   position: absolute;
   background-color: var(--primary-color);
   border: none;
@@ -43,7 +43,7 @@ body {
   transition: transform 0.2s ease;
 }
 
-.profile-button:hover, .plus-button:hover, .info-button:hover:hover {
+.profile-button:hover, .plus-button:hover, .hamburger-button:hover, .info-button:hover:hover {
   transform: scale(1.05);
   background-color: #8b5cf6;
 }
@@ -55,8 +55,17 @@ body {
   height: 48px;
 }
 
-.plus-button {
+/* Hamburger — sits between the profile and plus buttons, opens the
+   Explore drawer (Popular Routes / Routes Around You / Locations Nearby). */
+.hamburger-button {
   top: 80px;
+  right: 20px;
+  width: 48px;
+  height: 48px;
+}
+
+.plus-button {
+  top: 140px;
   right: 20px;
   width: 48px;
   height: 48px;
@@ -66,7 +75,7 @@ body {
    as a distinct, lighter action against the solid purple buttons above it. */
 .get-app-button {
   position: absolute;
-  top: 140px;
+  top: 200px;
   right: 20px;
   width: 48px;
   height: 48px;
@@ -237,7 +246,6 @@ body {
   border-radius: 14px;
   padding: 12px 12px 12px 16px;
   box-shadow: 0 4px 18px rgba(0,0,0,0.18);
-  border-left: 4px solid var(--primary-color);
 }
 
 .location-permission-text {
@@ -971,6 +979,50 @@ body {
   letter-spacing: -0.2px;
   margin-bottom: 2px;
   text-align: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ios-contributor-badge {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+.contribute-choice-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 12px 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.contribute-choice-option:active {
+  background: #F2F2F7;
+}
+
+.contribute-choice-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contribute-choice-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1C1C1E;
+}
+
+.contribute-choice-subtitle {
+  font-size: 13px;
+  color: #8E8E93;
 }
 
 .ios-user-email {
@@ -1018,6 +1070,7 @@ body {
   justify-content: center;
   margin-right: 12px;
   flex-shrink: 0;
+  background: 'none'
 }
 
 .ios-row-icon--purple { background: #6b21a8; }
@@ -1361,13 +1414,18 @@ body {
     z-index: 100;
   }
 
-  .plus-button{
+  .hamburger-button{
     top:100px;
     z-index: 1;
   }
 
-  .get-app-button{
+  .plus-button{
     top:160px;
+    z-index: 1;
+  }
+
+  .get-app-button{
+    top:220px;
     z-index: 1;
   }
 
@@ -2457,12 +2515,14 @@ body {
 /* ── Z-index hierarchy ──────────────────────────────── */
 .profile-button,
 .plus-button,
+.hamburger-button,
 .get-app-button,
 .map-action-stack,
 .floating-button { z-index: 1000; }
 
 .modal-overlay       { z-index: 1003; }
 .bottom-sheet-overlay { z-index: 1002; }
+.explore-drawer-overlay { z-index: 1002; }
 .loading-overlay     { z-index: 1005; }
 
 /* ── Mobile tweaks ──────────────────────────────────── */
@@ -3047,6 +3107,7 @@ body {
 /* Make sure other buttons remain fully opaque */
 .profile-button,
 .plus-button,
+.hamburger-button,
 .get-app-button,
 .locate-button,
 .google-maps-button,
@@ -3706,6 +3767,7 @@ body {
 .modal-overlay,
 .profile-button,
 .plus-button,
+.hamburger-button,
 .get-app-button,
 .info-button,
 .floating-button {
@@ -5961,6 +6023,50 @@ body, #root {
   font-variant-numeric: tabular-nums;
 }
 
+.update-stop-coords-changed {
+  color: #D97706;
+  font-weight: 700;
+}
+
+.update-stop-location-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.update-stop-location-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: #F5F3FF;
+  border: 1px solid #E9E5FC;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.update-stop-location-button:active {
+  background: #EDE9FE;
+}
+
+.update-stop-location-reset {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8E8E93;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+
+.update-stop-location-reset:active {
+  color: #1C1C1E;
+}
+
 .add-stop-modal .ios-form-input.add-stop-name-input {
   display: block;
   width: 100%;
@@ -6141,4 +6247,225 @@ body, #root {
 
 .donate-modal .report-submit-button:hover:not(:disabled) {
   background: #DC2626;
+}
+/* ══════════════════════════════════════════════════════════
+   EXPLORE DRAWER — hamburger button opens this. Slides in from
+   the right with Popular Routes, Routes Around You, and
+   Locations Nearby.
+══════════════════════════════════════════════════════════ */
+.explore-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.explore-drawer {
+  background: #ffffff;
+  width: 100%;
+  max-width: 360px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    -8px 0 32px rgba(107, 33, 168, 0.10),
+    -2px 0 8px rgba(0, 0, 0, 0.06);
+  animation: exploreDrawerSlideIn 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes exploreDrawerSlideIn {
+  from { transform: translateX(100%); opacity: 0.7; }
+  to   { transform: translateX(0);    opacity: 1;   }
+}
+
+.explore-drawer-header {
+  padding: 20px 20px 16px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.explore-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.explore-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.explore-tab svg {
+  color: var(--text-light);
+  transition: color 0.2s ease;
+}
+
+.explore-tab:hover {
+  color: var(--primary-color);
+}
+
+.explore-tab:hover svg {
+  color: var(--primary-color);
+}
+
+.explore-tab--active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.explore-tab--active svg {
+  color: var(--primary-color);
+}
+
+.explore-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 28px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.explore-section {
+  margin-bottom: 0;
+}
+
+.explore-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.explore-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 32px;
+  background: white;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.explore-list-item:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.explore-list-item:active {
+  transform: scale(0.98);
+}
+
+.explore-list-item-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(107, 33, 168, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.explore-list-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.explore-list-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explore-list-item-subtext {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.explore-empty-text {
+  font-size: 13px;
+  color: var(--text-light);
+  padding: 4px 0;
+}
+
+.explore-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 0;
+}
+
+.explore-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
+.explore-loading-text {
+  font-size: 13px;
+  color: var(--text-light);
+}
+
+.explore-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.explore-error-text {
+  font-size: 13px;
+  color: var(--text-light);
+}
+
+.explore-retry-button {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.explore-retry-button:hover {
+  background: var(--primary-light);
+}
+
+@media (max-width: 768px) {
+  .explore-drawer {
+    max-width: 320px;
+  }
 }

@@ -8,7 +8,8 @@ import {
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
-  Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download
+  Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
+  Menu, TrendingUp, Compass
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -28,6 +29,9 @@ import {
   setCachedStopSearch,
   getCachedUserSearchHistory,
   setCachedUserSearchHistory,
+  getCachedExploreRoutes,
+  setCachedExploreRoutes,
+  clearCachedExploreRoutes,
   haversineKm,
   NEARBY_RADIUS_KM,
   NEARBY_CACHE_MOVE_THRESHOLD_KM,
@@ -35,6 +39,10 @@ import {
 import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
+import contributorBadgeIcon from '../assets/trotro-vehicle.png';
+
+// Users with more than this many contributions get the trotro badge next to their name.
+const CONTRIBUTOR_BADGE_THRESHOLD = 5;
 
 const AuthForm = ({ onSignIn, onSignUp, authLoading, onForgotPasswordOpen }) => {
   const [email, setEmail] = useState('');
@@ -780,6 +788,17 @@ const GhanaTrotroTransit = () => {
   const [signOutLoading, setSignOutLoading] = useState(false);
   const [showSignOutSuccessModal, setShowSignOutSuccessModal] = useState(false);
 
+  // ── Explore drawer (hamburger button) ────────────────────────────────
+  // Slides in from the right with Popular Routes, Routes Around You, and
+  // Locations Nearby. Routes are fetched lazily the first time the drawer
+  // opens, then cached in state for the rest of the session.
+  const [showExploreDrawer, setShowExploreDrawer] = useState(false);
+  const [exploreActiveTab, setExploreActiveTab] = useState('popular'); // 'popular' | 'around' | 'nearby'
+  const [exploreRoutes, setExploreRoutes] = useState([]);
+  const [exploreLoading, setExploreLoading] = useState(false);
+  const [exploreError, setExploreError] = useState(null);
+  const exploreFetchedRef = useRef(false);
+
   // Profile modal — Account sub-view state
   const [profileView, setProfileView] = useState('menu'); // 'menu' | 'account'
   // Guests see the normal profile menu first — this only flips to true once
@@ -800,6 +819,24 @@ const GhanaTrotroTransit = () => {
   const [newStopImages, setNewStopImages] = useState([]); // File[]
   const [addStopSubmitting, setAddStopSubmitting] = useState(false);
   const [addStopSuccess, setAddStopSuccess] = useState(false);
+
+  // ── Contribute: choose between adding a new stop or updating one ────────
+  const [showContributeChoiceModal, setShowContributeChoiceModal] = useState(false);
+
+  // ── Update-stop flow: search for an existing stop, then edit its name/
+  // location/photos. A correction is submitted to `contributions` for review.
+  const [showUpdateStopModal, setShowUpdateStopModal] = useState(false);
+  const [updateStopView, setUpdateStopView] = useState('search'); // 'search' | 'edit'
+  const [updateStopSearchQuery, setUpdateStopSearchQuery] = useState('');
+  const [updateStopSearchResults, setUpdateStopSearchResults] = useState([]);
+  const [updateStopSearchLoading, setUpdateStopSearchLoading] = useState(false);
+  const [pendingUpdateStop, setPendingUpdateStop] = useState(null); // original { id, name, lat, lng }
+  const [updateStopName, setUpdateStopName] = useState('');
+  const [updateStopCoords, setUpdateStopCoords] = useState(null); // current (possibly edited) { lat, lng }
+  const [pickingUpdateLocation, setPickingUpdateLocation] = useState(false);
+  const [updateStopImages, setUpdateStopImages] = useState([]); // File[]
+  const [updateStopSubmitting, setUpdateStopSubmitting] = useState(false);
+  const [updateStopSuccess, setUpdateStopSuccess] = useState(false);
 
   // ── Donate (Paystack) ─────────────────────────────────────────────────
   const [showDonateModal, setShowDonateModal] = useState(false);
@@ -1342,9 +1379,30 @@ const GhanaTrotroTransit = () => {
   }, [user]);
 
   // ── Volunteer mode ──────────────────────────────────────────────────────
-  const handleStartVolunteering = useCallback(() => {
+  // Tapping "Contribute" now opens a choice modal (add a stop vs. update one)
+  // instead of dropping straight into add-a-stop mode.
+  const handleOpenContributeChoice = useCallback(() => {
     setShowProfileModal(false);
+    setShowContributeChoiceModal(true);
+  }, []);
+
+  const handleChooseAddStop = useCallback(() => {
+    setShowContributeChoiceModal(false);
     setVolunteerMode(true);
+  }, []);
+
+  const handleChooseUpdateStop = useCallback(() => {
+    setShowContributeChoiceModal(false);
+    setVolunteerMode(false);
+    setUpdateStopView('search');
+    setUpdateStopSearchQuery('');
+    setUpdateStopSearchResults([]);
+    setPendingUpdateStop(null);
+    setUpdateStopName('');
+    setUpdateStopCoords(null);
+    setUpdateStopImages([]);
+    setUpdateStopSuccess(false);
+    setShowUpdateStopModal(true);
   }, []);
 
   const handleStopVolunteering = useCallback(() => {
@@ -1360,15 +1418,24 @@ const GhanaTrotroTransit = () => {
     setVolunteerMode(true);
   }, []);
 
-  // Called by MapComponent when the map is tapped while volunteerMode is on
+  // Called by MapComponent when the map is tapped. While pickingUpdateLocation
+  // is on (from the Update Stop modal) this sets the new coordinates and
+  // reopens that modal; otherwise, while volunteerMode is on, it opens the
+  // "name this stop" form for a brand-new stop.
   const handleMapTap = useCallback((lat, lng) => {
+    if (pickingUpdateLocation) {
+      setUpdateStopCoords({ lat, lng });
+      setPickingUpdateLocation(false);
+      setShowUpdateStopModal(true);
+      return;
+    }
     if (!volunteerMode) return;
     setPendingStopCoords({ lat, lng });
     setNewStopName('');
     setNewStopImages([]);
     setAddStopSuccess(false);
     setShowAddStopModal(true);
-  }, [volunteerMode]);
+  }, [volunteerMode, pickingUpdateLocation]);
 
   // Called by MapComponent when a nearby-stop dot is double-tapped —
   // pre-fills the "start" field with that stop's name and opens the
@@ -1381,6 +1448,176 @@ const GhanaTrotroTransit = () => {
     setBottomSheetContent('search');
     setShowBottomSheet(true);
   }, []);
+
+  const closeUpdateStopModal = useCallback(() => {
+    setShowUpdateStopModal(false);
+    setUpdateStopView('search');
+    setUpdateStopSearchQuery('');
+    setUpdateStopSearchResults([]);
+    setPendingUpdateStop(null);
+    setUpdateStopName('');
+    setUpdateStopCoords(null);
+    setUpdateStopImages([]);
+  }, []);
+
+  // Searches approved stops by name so the user can find the one they want
+  // to correct — kept separate from the main start/destination `suggestions`
+  // state so the two search UIs never clobber each other.
+  const fetchUpdateStopResults = useCallback(async (query) => {
+    if (query.trim().length < 2) {
+      setUpdateStopSearchResults([]);
+      return;
+    }
+    setUpdateStopSearchLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('stops')
+        .select('id, name, latitude, longitude')
+        .eq('approved', true)
+        .ilike('name', `%${query.trim()}%`)
+        .limit(10);
+      if (error) throw error;
+      setUpdateStopSearchResults(data || []);
+    } catch (error) {
+      console.error('Error searching stops to update:', error);
+      setUpdateStopSearchResults([]);
+    } finally {
+      setUpdateStopSearchLoading(false);
+    }
+  }, []);
+
+  const handleUpdateStopSearchChange = useCallback((e) => {
+    const val = e.target.value;
+    setUpdateStopSearchQuery(val);
+    fetchUpdateStopResults(val);
+  }, [fetchUpdateStopResults]);
+
+  const handleSelectStopToUpdate = useCallback((stop) => {
+    const lat = parseFloat(stop.latitude);
+    const lng = parseFloat(stop.longitude);
+    setPendingUpdateStop({ id: stop.id, name: stop.name, lat, lng });
+    setUpdateStopName(stop.name);
+    setUpdateStopCoords({ lat, lng });
+    setUpdateStopView('edit');
+  }, []);
+
+  const handleBackToStopSearch = useCallback(() => {
+    setUpdateStopView('search');
+  }, []);
+
+  // Hides the modal and lets the user tap the map to relocate the stop;
+  // handleMapTap (above) captures the tap and reopens this modal.
+  const handleStartPickUpdateLocation = useCallback(() => {
+    setShowUpdateStopModal(false);
+    setPickingUpdateLocation(true);
+  }, []);
+
+  const handleCancelPickUpdateLocation = useCallback(() => {
+    setPickingUpdateLocation(false);
+    setShowUpdateStopModal(true);
+  }, []);
+
+  const handleResetUpdateLocation = useCallback(() => {
+    if (!pendingUpdateStop) return;
+    setUpdateStopCoords({ lat: pendingUpdateStop.lat, lng: pendingUpdateStop.lng });
+  }, [pendingUpdateStop]);
+
+  const handleUpdateStopImagesSelected = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUpdateStopImages((prev) => [...prev, ...files]);
+    e.target.value = '';
+  }, []);
+
+  const removeUpdateStopImage = useCallback((index) => {
+    setUpdateStopImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // Submits a correction for an existing stop into the `contributions` table
+  // (type: 'update') for a moderator to review — the stop itself isn't
+  // changed until it's approved. Any attached photos still go through the
+  // normal stop_images pending-approval flow.
+  const handleSubmitStopUpdate = useCallback(async () => {
+    if (!pendingUpdateStop || !pendingUpdateStop.id || !updateStopName.trim()) return;
+    setUpdateStopSubmitting(true);
+    try {
+      const payload = {};
+
+      if (updateStopName.trim() !== pendingUpdateStop.name) {
+        payload.name = updateStopName.trim();
+        payload.previous_name = pendingUpdateStop.name;
+      }
+
+      if (
+        updateStopCoords &&
+        (updateStopCoords.lat !== pendingUpdateStop.lat || updateStopCoords.lng !== pendingUpdateStop.lng)
+      ) {
+        payload.latitude = updateStopCoords.lat;
+        payload.longitude = updateStopCoords.lng;
+        payload.previous_latitude = pendingUpdateStop.lat;
+        payload.previous_longitude = pendingUpdateStop.lng;
+      }
+
+      if (Object.keys(payload).length === 0 && updateStopImages.length === 0) {
+        alert('Change the name or location, or add a photo, before submitting.');
+        setUpdateStopSubmitting(false);
+        return;
+      }
+
+      if (Object.keys(payload).length > 0) {
+        const { error: contribError } = await supabase.from('contributions').insert({
+          user_id: user?.id ?? null,
+          type: 'update',
+          stop_id: pendingUpdateStop.id,
+          payload,
+          status: 'pending',
+        });
+        if (contribError) throw contribError;
+      }
+
+      for (const file of updateStopImages) {
+        try {
+          const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+          const leaf = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const path = `${pendingUpdateStop.id}/${leaf}.${ext}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('stop-images')
+            .upload(path, file, { contentType: file.type || 'image/jpeg' });
+          if (uploadError) throw uploadError;
+
+          const { data: publicData } = supabase.storage.from('stop-images').getPublicUrl(path);
+          await supabase.from('stop_images').insert({
+            stop_id: pendingUpdateStop.id,
+            url: publicData?.publicUrl,
+            uploaded_by: user?.id ?? null,
+            approved: false,
+          });
+        } catch (imgErr) {
+          // One photo failing shouldn't block the update submission itself
+          console.error('Error uploading an update photo:', imgErr);
+        }
+      }
+
+      setUpdateStopSuccess(true);
+      setTimeout(() => {
+        setShowUpdateStopModal(false);
+        setUpdateStopView('search');
+        setUpdateStopSearchQuery('');
+        setUpdateStopSearchResults([]);
+        setPendingUpdateStop(null);
+        setUpdateStopName('');
+        setUpdateStopCoords(null);
+        setUpdateStopImages([]);
+        setUpdateStopSuccess(false);
+      }, 1200);
+    } catch (error) {
+      console.error('Error submitting stop update:', error);
+      alert('Error: ' + (error.message || 'Could not submit this update. Please try again.'));
+    } finally {
+      setUpdateStopSubmitting(false);
+    }
+  }, [pendingUpdateStop, updateStopName, updateStopCoords, updateStopImages, user]);
 
   const closeAddStopModal = useCallback(() => {
     setShowAddStopModal(false);
@@ -1683,7 +1920,13 @@ const GhanaTrotroTransit = () => {
         async (payload) => {
           console.log('Route change detected:', payload);
           setLastUpdateTime(new Date());
-          
+
+          // The Explore drawer's cached route batch is now stale too -
+          // clear it so the next open (or retry) pulls fresh data instead
+          // of the local copy.
+          clearCachedExploreRoutes();
+          exploreFetchedRef.current = false;
+
           // If we have an active search, refresh the routes
           if (routes.length > 0 && startPoint && destination) {
             await refreshCurrentRoutes();
@@ -1700,7 +1943,10 @@ const GhanaTrotroTransit = () => {
         async (payload) => {
           console.log('Route stop change detected:', payload);
           setLastUpdateTime(new Date());
-          
+
+          clearCachedExploreRoutes();
+          exploreFetchedRef.current = false;
+
           // If we have an active search, refresh the routes
           if (routes.length > 0 && startPoint && destination) {
             await refreshCurrentRoutes();
@@ -1717,7 +1963,10 @@ const GhanaTrotroTransit = () => {
         async (payload) => {
           console.log('Stop change detected:', payload);
           setLastUpdateTime(new Date());
-          
+
+          clearCachedExploreRoutes();
+          exploreFetchedRef.current = false;
+
           // If we have an active search, refresh the routes
           if (routes.length > 0 && startPoint && destination) {
             await refreshCurrentRoutes();
@@ -1812,6 +2061,7 @@ const GhanaTrotroTransit = () => {
             stops(*)
           )
         `)
+        .eq('approved', true)
         .order('total_fare');
 
       if (error) throw error;
@@ -1913,6 +2163,7 @@ const GhanaTrotroTransit = () => {
             stops(*)
           )
         `)
+        .eq('approved', true)
         .order('total_fare');
 
       if (error) {
@@ -1980,6 +2231,136 @@ const GhanaTrotroTransit = () => {
       setIsFindingRoutes(false);
     }
   }, [user, startPoint, destination, saveSearchHistory, fetchRouteInfo, logUnmatchedSearch]);
+
+  // ── Explore drawer data ──────────────────────────────────────────────
+  // Pulls a batch of routes (same shape as the search flow, via
+  // formatRoute) so the drawer can slice it into "Popular" and "Around
+  // You" lists. The result is mirrored to localStorage (see cookies.js)
+  // so it survives reloads too, not just the current session - and that
+  // cache is invalidated automatically by the realtime subscription below
+  // whenever routes/route_stops/stops change in the DB, so a freshly
+  // added route doesn't wait out the cache's TTL to show up here.
+  // `force` skips both the in-session guard and the local cache, for
+  // retries and post-invalidation refetches.
+  const fetchExploreRoutes = useCallback(async (force = false) => {
+    if (!force) {
+      if (exploreFetchedRef.current) return;
+
+      const cached = getCachedExploreRoutes();
+      if (cached) {
+        exploreFetchedRef.current = true;
+        setExploreRoutes(cached);
+        return;
+      }
+    }
+
+    exploreFetchedRef.current = true;
+    setExploreLoading(true);
+    setExploreError(null);
+
+    try {
+      const { data: routesData, error } = await supabase
+        .from('routes')
+        .select(`
+          *,
+          route_stops(
+            stop_order,
+            fare_to_next,
+            distance_to_next,
+            stops(*)
+          )
+        `)
+        .eq('approved', true)
+        .order('total_fare')
+        .limit(40);
+
+      if (error) throw error;
+
+      const withStops = (routesData || []).filter(
+        (r) => r.route_stops && r.route_stops.length > 0
+      );
+      const formatted = await Promise.all(withStops.map((route) => formatRoute(route)));
+      const cleaned = formatted.filter(Boolean);
+      setExploreRoutes(cleaned);
+      setCachedExploreRoutes(cleaned);
+    } catch (error) {
+      console.error('Error fetching explore routes:', error);
+      exploreFetchedRef.current = false; // allow a retry on next open
+      setExploreError('Could not load routes right now.');
+    } finally {
+      setExploreLoading(false);
+    }
+  }, []);
+
+  const openExploreDrawer = useCallback(() => {
+    setShowExploreDrawer(true);
+    setExploreActiveTab('popular');
+    fetchExploreRoutes();
+  }, [fetchExploreRoutes]);
+
+  const closeExploreDrawer = useCallback(() => {
+    setShowExploreDrawer(false);
+  }, []);
+
+  const retryExploreRoutes = useCallback(() => {
+    exploreFetchedRef.current = false;
+    fetchExploreRoutes(true);
+  }, [fetchExploreRoutes]);
+
+  // Popular Routes — there's no live popularity metric in the schema yet,
+  // so this surfaces a stable, representative slice (cheapest-fare-first,
+  // the same ordering already used across the app) instead of a made-up
+  // ranking.
+  const popularRoutes = useMemo(() => exploreRoutes.slice(0, 8), [exploreRoutes]);
+
+  // Routes Around You — any fetched route with at least one stop inside
+  // the same nearby-radius already used for the map's nearby-stop dots,
+  // nearest-stop-first.
+  const routesAroundYou = useMemo(() => {
+    if (!userLocation) return [];
+    return exploreRoutes
+      .map((route) => {
+        const distances = (route.stops || [])
+          .filter((s) => typeof s.lat === 'number' && typeof s.lng === 'number' && !Number.isNaN(s.lat) && !Number.isNaN(s.lng))
+          .map((s) => haversineKm(userLocation.lat, userLocation.lng, s.lat, s.lng));
+        const minDistance = distances.length ? Math.min(...distances) : Infinity;
+        return { route, minDistance };
+      })
+      .filter(({ minDistance }) => minDistance <= NEARBY_RADIUS_KM)
+      .sort((a, b) => a.minDistance - b.minDistance)
+      .slice(0, 8);
+  }, [exploreRoutes, userLocation]);
+
+  // Locations Nearby reuses the same nearbyStops already fetched for the
+  // map's reference dots, sorted closest-first once we have a location fix.
+  const locationsNearby = useMemo(() => {
+    const withDistance = nearbyStops.map((stop) => ({
+      stop,
+      distance: userLocation ? haversineKm(userLocation.lat, userLocation.lng, stop.lat, stop.lng) : null,
+    }));
+    if (userLocation) withDistance.sort((a, b) => a.distance - b.distance);
+    return withDistance.slice(0, 10);
+  }, [nearbyStops, userLocation]);
+
+  // Selecting a route from the drawer mirrors the normal search-result
+  // selection flow: it becomes the active route on the map and its details
+  // open in the bottom sheet.
+  const handleExploreRouteSelect = useCallback(async (route) => {
+    setRoutes([route]);
+    setSelectedRoute(route);
+    setBottomSheetContent('route');
+    setBottomSheetState('route-details');
+    setShowBottomSheet(true);
+    setShowExploreDrawer(false);
+    await fetchRouteInfo(route.id);
+  }, [fetchRouteInfo]);
+
+  // Selecting a nearby location drops it into the start-point search field,
+  // same as tapping one of the faint nearby-stop dots on the map.
+  const handleExploreStopSelect = useCallback((stopName) => {
+    setShowExploreDrawer(false);
+    handleNearbyStopSelect(stopName);
+  }, [handleNearbyStopSelect]);
 
   const swapLocations = useCallback(() => {
     const temp = startPoint;
@@ -2200,7 +2581,7 @@ const GhanaTrotroTransit = () => {
   }, [showSwipeIndicator]);
 
   // Check if any modal or bottom sheet is open
-  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showRouteNotFoundModal;
+  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showRouteNotFoundModal || showExploreDrawer;
 
   // Effects
   useEffect(() => {
@@ -3072,7 +3453,7 @@ const GhanaTrotroTransit = () => {
         userLocation={userLocation}
         primaryColor={COLORS.primary}
         currentUserId={user?.id ?? null}
-        volunteerMode={volunteerMode}
+        volunteerMode={volunteerMode || pickingUpdateLocation}
         onMapTap={handleMapTap}
         recenterUserTrigger={recenterUserTrigger}
         recenterRouteTrigger={recenterRouteTrigger}
@@ -3090,7 +3471,7 @@ const GhanaTrotroTransit = () => {
         <div className="location-permission-banner">
           <MapPin size={18} color={COLORS.primary} />
           <p className="location-permission-text">
-            Turn on location for a better experience — see your position and nearby stops on the map.
+            Turn on location for a better experience, see your position and nearby stops on the map.
           </p>
           <button
             className="location-permission-enable-button"
@@ -3114,6 +3495,16 @@ const GhanaTrotroTransit = () => {
         onClick={() => setShowProfileModal(true)}
       >
         <User size={24} color="#FFFFFF" />
+      </button>
+
+      {/* Explore — opens the slide-in drawer with Popular Routes, Routes
+          Around You, and Locations Nearby. */}
+      <button
+        className="hamburger-button"
+        onClick={openExploreDrawer}
+        aria-label="Explore routes and nearby stops"
+      >
+        <Menu size={20} color="#8b5cf6" />
       </button>
 
       <button
@@ -3248,6 +3639,161 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
+      {/* ── Explore Drawer — slides in from the right ─────────────────────
+          Tabs for Popular Routes, Routes Around You, and Locations
+          Nearby. Data is fetched lazily the first time the drawer opens. */}
+      {showExploreDrawer && (
+        <div
+          className="explore-drawer-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) closeExploreDrawer(); }}
+        >
+          <div className="explore-drawer">
+            <div className="modal-header explore-drawer-header">
+              <h2 className="modal-title">Explore</h2>
+              <button className="close-button" onClick={closeExploreDrawer} aria-label="Close">
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="explore-tabs">
+              <button
+                className={`explore-tab ${exploreActiveTab === 'popular' ? 'explore-tab--active' : ''}`}
+                onClick={() => setExploreActiveTab('popular')}
+              >
+                <TrendingUp size={15} />
+                <span>Popular</span>
+              </button>
+              <button
+                className={`explore-tab ${exploreActiveTab === 'around' ? 'explore-tab--active' : ''}`}
+                onClick={() => setExploreActiveTab('around')}
+              >
+                <Compass size={15} />
+                <span>Around You</span>
+              </button>
+              <button
+                className={`explore-tab ${exploreActiveTab === 'nearby' ? 'explore-tab--active' : ''}`}
+                onClick={() => setExploreActiveTab('nearby')}
+              >
+                <MapPin size={15} />
+                <span>Nearby</span>
+              </button>
+            </div>
+
+            <div className="explore-drawer-body">
+              {exploreLoading && exploreRoutes.length === 0 ? (
+                <div className="explore-loading">
+                  <div className="loading-spinner explore-loading-spinner"></div>
+                  <p className="explore-loading-text">Loading routes…</p>
+                </div>
+              ) : exploreError && exploreRoutes.length === 0 ? (
+                <div className="explore-error">
+                  <p className="explore-error-text">{exploreError}</p>
+                  <button className="explore-retry-button" onClick={retryExploreRoutes}>
+                    Try Again
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Popular Routes */}
+                  {exploreActiveTab === 'popular' && (
+                    <div className="explore-section">
+                      {popularRoutes.length > 0 ? (
+                        <div className="explore-list">
+                          {popularRoutes.map((route) => (
+                            <button
+                              key={route.id}
+                              className="explore-list-item"
+                              onClick={() => handleExploreRouteSelect(route)}
+                            >
+                              <div className="explore-list-item-icon">
+                                <Bus size={16} color={COLORS.primary} />
+                              </div>
+                              <div className="explore-list-item-content">
+                                <span className="explore-list-item-name">{route.name}</span>
+                                <span className="explore-list-item-subtext">
+                                  GH₵ {route.total_fare} • {route.total_distance}km
+                                </span>
+                              </div>
+                              <ChevronRight size={16} color="#8E8E93" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="explore-empty-text">No routes available yet.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Routes Around You */}
+                  {exploreActiveTab === 'around' && (
+                    <div className="explore-section">
+                      {!userLocation ? (
+                        <p className="explore-empty-text">Turn on location to see routes near you.</p>
+                      ) : routesAroundYou.length > 0 ? (
+                        <div className="explore-list">
+                          {routesAroundYou.map(({ route, minDistance }) => (
+                            <button
+                              key={route.id}
+                              className="explore-list-item"
+                              onClick={() => handleExploreRouteSelect(route)}
+                            >
+                              <div className="explore-list-item-icon">
+                                <Bus size={16} color={COLORS.primary} />
+                              </div>
+                              <div className="explore-list-item-content">
+                                <span className="explore-list-item-name">{route.name}</span>
+                                <span className="explore-list-item-subtext">
+                                  {minDistance.toFixed(1)}km away • GH₵ {route.total_fare}
+                                </span>
+                              </div>
+                              <ChevronRight size={16} color="#8E8E93" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="explore-empty-text">No routes found near you yet.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Locations Nearby */}
+                  {exploreActiveTab === 'nearby' && (
+                    <div className="explore-section">
+                      {!userLocation ? (
+                        <p className="explore-empty-text">Turn on location to see stops near you.</p>
+                      ) : locationsNearby.length > 0 ? (
+                        <div className="explore-list">
+                          {locationsNearby.map(({ stop, distance }) => (
+                            <button
+                              key={stop.id}
+                              className="explore-list-item"
+                              onClick={() => handleExploreStopSelect(stop.name)}
+                            >
+                              <div className="explore-list-item-icon">
+                                <MapPin size={16} color={COLORS.primary} />
+                              </div>
+                              <div className="explore-list-item-content">
+                                <span className="explore-list-item-name">{stop.name}</span>
+                                <span className="explore-list-item-subtext">
+                                  {distance != null ? `${distance.toFixed(1)}km away` : 'Nearby'}
+                                </span>
+                              </div>
+                              <ChevronRight size={16} color="#8E8E93" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="explore-empty-text">No stops found nearby yet.</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Profile Modal - Non-blocking */}
       {showProfileModal && (
         <div 
@@ -3303,6 +3849,14 @@ const GhanaTrotroTransit = () => {
                     </div>
                     <span className="ios-user-name">
                       {userProfile?.first_name} {userProfile?.last_name}
+                      {(userProfile?.contribution_count || 0) > CONTRIBUTOR_BADGE_THRESHOLD && (
+                        <img
+                          className="ios-contributor-badge"
+                          src={contributorBadgeIcon}
+                          alt="Top contributor badge"
+                          title={`Top contributor · ${userProfile.contribution_count} contributions`}
+                        />
+                      )}
                     </span>
                     <span className="ios-user-email">{user.email}</span>
                   </div>
@@ -3378,12 +3932,12 @@ const GhanaTrotroTransit = () => {
                     <div className="ios-list-group">
                       <button
                         className="ios-list-row"
-                        onClick={handleStartVolunteering}
+                        onClick={handleOpenContributeChoice}
                       >
                         <span className="ios-row-icon ios-row-icon--teal">
                           <Users size={16} color="#FFFFFF" />
                         </span>
-                        <span className="ios-row-text">Add a Stop</span>
+                        <span className="ios-row-text">Contribute</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
                       </button>
 
@@ -3534,7 +4088,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
-      {/* ── Volunteer mode banner ── */}
+      {/* ── Volunteer mode banner (add a stop) ── */}
       {volunteerMode && !showAddStopModal && (
         <div className="volunteer-mode-banner">
           <div className="volunteer-mode-banner-text">
@@ -3543,6 +4097,19 @@ const GhanaTrotroTransit = () => {
           </div>
           <button className="volunteer-mode-done-button" onClick={handleStopVolunteering}>
             Done
+          </button>
+        </div>
+      )}
+
+      {/* ── Pick new location banner (Update Stop → Change Location) ── */}
+      {pickingUpdateLocation && (
+        <div className="volunteer-mode-banner">
+          <div className="volunteer-mode-banner-text">
+            <Edit3 size={16} color="#FFFFFF" />
+            <span>Tap the map to set this stop&apos;s new location</span>
+          </div>
+          <button className="volunteer-mode-done-button" onClick={handleCancelPickUpdateLocation}>
+            Cancel
           </button>
         </div>
       )}
@@ -3624,6 +4191,206 @@ const GhanaTrotroTransit = () => {
                     disabled={!newStopName.trim() || addStopSubmitting}
                   >
                     {addStopSubmitting ? 'Submitting...' : 'Submit Stop'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Contribute Choice Modal ── */}
+      {showContributeChoiceModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowContributeChoiceModal(false); }}
+        >
+          <div className="modal contribute-choice-modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Contribute</h2>
+              <button className="close-button" onClick={() => setShowContributeChoiceModal(false)}>
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content">
+              <button className="contribute-choice-option" onClick={handleChooseAddStop}>
+                <span className="ios-row-icon ios-row-icon--teal">
+                  <MapPin size={16} color="#FFFFFF" />
+                </span>
+                <span className="contribute-choice-text">
+                  <span className="contribute-choice-title">Add a Stop</span>
+                  <span className="contribute-choice-subtitle">Drop a pin for a stop that&apos;s missing from the map</span>
+                </span>
+                <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+              </button>
+
+              <div className="ios-list-divider"></div>
+
+              <button className="contribute-choice-option" onClick={handleChooseUpdateStop}>
+                <span className="ios-row-icon ios-row-icon--blue">
+                  <Edit3 size={16} color="#FFFFFF" />
+                </span>
+                <span className="contribute-choice-text">
+                  <span className="contribute-choice-title">Update a Stop</span>
+                  <span className="contribute-choice-subtitle">Fix a name or add a photo for an existing stop</span>
+                </span>
+                <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Update Stop Modal (search → edit) ── */}
+      {showUpdateStopModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget && !updateStopSubmitting) closeUpdateStopModal(); }}
+        >
+          <div className="modal add-stop-modal">
+            {updateStopSuccess ? (
+              <div className="report-success">
+                <div className="report-success-icon">
+                  <Check size={32} color="#10B981" />
+                </div>
+                <h3 className="report-success-title">Update Submitted!</h3>
+                <p className="report-success-msg">
+                  Thanks for helping keep the map accurate. Your update will apply once it&apos;s verified.
+                </p>
+              </div>
+            ) : updateStopView === 'search' ? (
+              <>
+                <div className="modal-header">
+                  <h2 className="modal-title">Find a Stop to Update</h2>
+                  <button className="close-button" onClick={closeUpdateStopModal}>
+                    <X size={18} strokeWidth={2.5} />
+                  </button>
+                </div>
+
+                <div className="modal-content">
+                  <p className="report-section-label">Stop name</p>
+                  <input
+                    className="ios-form-input add-stop-name-input"
+                    placeholder="Search for a stop..."
+                    value={updateStopSearchQuery}
+                    onChange={handleUpdateStopSearchChange}
+                    maxLength={100}
+                    autoFocus
+                  />
+
+                  {updateStopSearchLoading && (
+                    <p className="add-stop-photos-hint">Searching...</p>
+                  )}
+
+                  {!updateStopSearchLoading && updateStopSearchQuery.trim().length >= 2 && updateStopSearchResults.length === 0 && (
+                    <p className="add-stop-photos-hint">No approved stops match that name.</p>
+                  )}
+
+                  {updateStopSearchResults.length > 0 && (
+                    <div className="suggestions-container">
+                      {updateStopSearchResults.map((stop) => (
+                        <button
+                          key={stop.id}
+                          className="suggestion-item"
+                          onClick={() => handleSelectStopToUpdate(stop)}
+                        >
+                          <MapPin size={16} color={COLORS.primary} />
+                          <span className="suggestion-text">{stop.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="modal-header">
+                  <h2 className="modal-title">Update Stop</h2>
+                  <button className="close-button" onClick={closeUpdateStopModal} disabled={updateStopSubmitting}>
+                    <X size={18} strokeWidth={2.5} />
+                  </button>
+                </div>
+
+                <div className="modal-content">
+                  <button className="ios-back-row" onClick={handleBackToStopSearch}>
+                    <ChevronLeft size={18} color={COLORS.primary} />
+                    <span>Back to search</span>
+                  </button>
+
+                  <p className="report-section-label">Stop name *</p>
+                  <input
+                    className="ios-form-input add-stop-name-input"
+                    placeholder="e.g. Achimota Market"
+                    value={updateStopName}
+                    onChange={(e) => setUpdateStopName(e.target.value)}
+                    maxLength={100}
+                  />
+
+                  <p className="report-section-label">Location</p>
+                  {updateStopCoords && (
+                    <p className="add-stop-coords">
+                      {updateStopCoords.lat.toFixed(5)}, {updateStopCoords.lng.toFixed(5)}
+                      {pendingUpdateStop && (updateStopCoords.lat !== pendingUpdateStop.lat || updateStopCoords.lng !== pendingUpdateStop.lng) && (
+                        <span className="update-stop-coords-changed"> (changed)</span>
+                      )}
+                    </p>
+                  )}
+                  <div className="update-stop-location-actions">
+                    <button
+                      type="button"
+                      className="update-stop-location-button"
+                      onClick={handleStartPickUpdateLocation}
+                    >
+                      <MapPin size={15} color={COLORS.primary} />
+                      <span>Change Location on Map</span>
+                    </button>
+                    {pendingUpdateStop && updateStopCoords && (updateStopCoords.lat !== pendingUpdateStop.lat || updateStopCoords.lng !== pendingUpdateStop.lng) && (
+                      <button
+                        type="button"
+                        className="update-stop-location-reset"
+                        onClick={handleResetUpdateLocation}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="report-section-label">Photos (optional)</p>
+                  <div className="add-stop-photos-grid">
+                    {updateStopImages.map((file, i) => (
+                      <div className="add-stop-photo-thumb" key={i}>
+                        <img src={URL.createObjectURL(file)} alt={`Update photo ${i + 1}`} />
+                        <button
+                          type="button"
+                          className="add-stop-photo-remove"
+                          onClick={() => removeUpdateStopImage(i)}
+                        >
+                          <X size={12} strokeWidth={3} />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="add-stop-photo-add">
+                      <ImagePlus size={20} color={COLORS.primary} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={handleUpdateStopImagesSelected}
+                      />
+                    </label>
+                  </div>
+                  <p className="add-stop-photos-hint">
+                    Changes are reviewed before they go live on the map.
+                  </p>
+
+                  <button
+                    className={`report-submit-button${(!updateStopName.trim() || updateStopSubmitting) ? ' report-submit-disabled' : ''}`}
+                    onClick={handleSubmitStopUpdate}
+                    disabled={!updateStopName.trim() || updateStopSubmitting}
+                  >
+                    {updateStopSubmitting ? 'Submitting...' : 'Submit Update'}
                   </button>
                 </div>
               </>
@@ -3910,7 +4677,7 @@ const GhanaTrotroTransit = () => {
                   </div>
                   <h3 className="download-app-heading">Get the App</h3>
                   <p className="download-app-text">
-                    Get Ghana Trotro Transit on your phone for a faster, native experience — download it below.
+                    Get Ghana Trotro Transit on your phone for a faster, native experience, download it below.
                   </p>
                 </>
               )}
