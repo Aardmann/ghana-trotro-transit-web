@@ -14,11 +14,11 @@ const COOKIE_MAX_AGE_DAYS = 365;
 // larger than a cookie should hold, so they live in localStorage instead.
 // Every device cache in this file (nearby stops, stop search, a signed-in
 // user's search history mirror, stop photos, and the "seen the map before"
-// flag) shares this one lifetime. NOTE: a 24-hour TTL means a newly-added or
-// newly-approved stop in an area you've already cached can take up to 24
-// hours to show up on this device unless the cache is cleared or the move
+// flag) shares this one lifetime. NOTE: a 30-day TTL means a newly-added or
+// newly-approved stop in an area you've already cached can take up to 30
+// days to show up on this device unless the cache is cleared or the move
 // threshold is crossed. That's a deliberate tradeoff for fewer DB calls.
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 const NEARBY_STOPS_CACHE_KEY = 'gtt_nearby_stops_cache';
 const NEARBY_RADIUS_KM = 2;
@@ -167,7 +167,7 @@ export const clearCookieConsent = () => {
 // Once geolocation permission has been granted, we cache the coordinates
 // here so future visits can use them straight away without calling
 // navigator.geolocation again at all - which is what actually guarantees
-// the user is never "asked" a second time. Same 24-hour lifetime as the
+// the user is never "asked" a second time. Same 30-day lifetime as the
 // rest of the device caches.
 const LAST_LOCATION_CACHE_KEY = 'gtt_last_location_cache';
 const LAST_LOCATION_CACHE_TTL_MS = CACHE_TTL_MS;
@@ -410,7 +410,7 @@ export const clearCachedStopImages = () => {
 
 // ── "Seen the map before" flag ───────────────────────────────────────────
 // True once this device has successfully loaded the map once within the
-// last 24 hours. The map screen uses this to skip the loading overlay on
+// last 30 days. The map screen uses this to skip the loading overlay on
 // repeat visits.
 export const hasSeenMapBefore = () => {
   const store = readLocalJSON(MAP_SEEN_BEFORE_KEY);

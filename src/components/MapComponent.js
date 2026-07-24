@@ -25,6 +25,7 @@ const MapComponent = React.memo(({
   onMapTap,
   recenterUserTrigger = 0,
   recenterRouteTrigger = 0,
+  onPhotoLightboxChange,
 }) => {
   const iframeRef = useRef(null);
   const mapReadyRef = useRef(false);
@@ -321,10 +322,19 @@ const MapComponent = React.memo(({
       if (e.data?.type === 'MAP_MOVED' && onMapMoved) {
         onMapMoved(e.data.lat, e.data.lng, e.data.bounds);
       }
+      // Photo lightbox opened/closed inside the iframe — bubble this up so
+      // HomeScreen can hide its own floating buttons (which live outside the
+      // iframe and would otherwise sit on top of the lightbox overlay).
+      if (e.data?.type === 'PHOTO_LIGHTBOX_OPEN' && onPhotoLightboxChange) {
+        onPhotoLightboxChange(true);
+      }
+      if (e.data?.type === 'PHOTO_LIGHTBOX_CLOSE' && onPhotoLightboxChange) {
+        onPhotoLightboxChange(false);
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onLayerChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops]);
+  }, [onLayerChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange]);
 
   // Skip the very first render (trigger starts at 0) — only fire when the
   // parent actually bumps the counter in response to a tap (or the
@@ -507,10 +517,6 @@ const MapComponent = React.memo(({
     }
     .stop-photo-badge.empty{ background-color:${primaryColor}; }
     .stop-photo-plus{ color:#fff;font-size:19px;font-weight:700;line-height:1;pointer-events:none; margin-top: -5px;}
-    .stop-photo-count{
-      position:absolute;bottom:-4px;right:-4px;background:#1E293B;color:#fff;
-      font-size:9px;font-weight:700;border-radius:8px;padding:1px 4px;line-height:1.35;
-    }
     .stop-photo-pending-dot{
       position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;
       background:#F59E0B;border:2px solid #fff;
@@ -1342,12 +1348,6 @@ function buildPhotoBadgeEl(stop) {
   if (approved.length > 0) {
     el.style.backgroundImage = "url('" + approved[0].url + "')";
     el.onclick = function(e) { e.stopPropagation(); openLightbox(stop); };
-    if (approved.length > 1) {
-      var countEl = document.createElement('span');
-      countEl.className = 'stop-photo-count';
-      countEl.textContent = '+' + (approved.length - 1);
-      el.appendChild(countEl);
-    }
   } else {
     el.classList.add('empty');
     var plus = document.createElement('span');
@@ -1514,11 +1514,13 @@ function openLightbox(stop) {
   function close() {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     if (activeLightboxClose === close) activeLightboxClose = null;
+    try { window.parent.postMessage({ type: 'PHOTO_LIGHTBOX_CLOSE' }, '*'); } catch(e) {}
   }
   activeLightboxClose = close;
 
   render();
   document.body.appendChild(overlay);
+  try { window.parent.postMessage({ type: 'PHOTO_LIGHTBOX_OPEN' }, '*'); } catch(e) {}
 }
 
 // ── Messages from React (photo data sync + upload results) ──────────────────

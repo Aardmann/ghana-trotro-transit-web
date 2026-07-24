@@ -548,6 +548,12 @@ const GhanaTrotroTransit = () => {
   // Session-only — once the user closes the nudge, don't show it again
   // for the rest of this visit.
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
+  // True once the browser has actually denied the geolocation prompt -
+  // after that, calling getCurrentPosition again can never re-show the
+  // native prompt, so the banner needs to say so instead of the "Enable"
+  // button silently doing nothing on tap.
+  const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
+  const [isRequestingLocation, setIsRequestingLocation] = useState(false);
 
   // ── Nearby stops (faint reference dots around the user) ─────────────
   // Fetched once per location (device-cached — see fetchNearbyStops below)
@@ -586,6 +592,7 @@ const GhanaTrotroTransit = () => {
         .from('stops')
         .select('id, name, latitude, longitude, vehicle_type')
         .eq('approved', true)
+        .eq('user_location_to_create', false)
         .gte('latitude', coords.lat - latDelta)
         .lte('latitude', coords.lat + latDelta)
         .gte('longitude', coords.lng - lngDelta)
@@ -673,8 +680,12 @@ const GhanaTrotroTransit = () => {
   const requestUserLocation = useCallback(() => {
     if (!navigator.geolocation) return;
 
+    setIsRequestingLocation(true);
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        setIsRequestingLocation(false);
+        setLocationPermissionDenied(false);
         const coords = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -710,6 +721,16 @@ const GhanaTrotroTransit = () => {
       },
       (error) => {
         console.warn('Geolocation unavailable or denied:', error.message);
+        setIsRequestingLocation(false);
+        // Once the browser has denied geolocation, calling
+        // getCurrentPosition again will keep returning this same error
+        // immediately without ever showing the permission prompt again -
+        // there is no JS-only way to reopen it. Track that so the banner
+        // can tell the user to flip it on in their browser/site settings
+        // instead of the "Enable" tap silently doing nothing.
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationPermissionDenied(true);
+        }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
@@ -774,6 +795,11 @@ const GhanaTrotroTransit = () => {
     hasAutoCenteredOnUserRef.current = true;
     setRecenterUserTrigger((t) => t + 1);
   }, [userLocation, selectedRoute]);
+
+  // True while a stop's full-size photo lightbox is open inside the map
+  // iframe — used to hide the app's own floating buttons (hamburger,
+  // search, locate-me, etc.) so they don't float on top of the lightbox.
+  const [isPhotoLightboxOpen, setIsPhotoLightboxOpen] = useState(false);
 
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
   
@@ -1179,6 +1205,7 @@ const GhanaTrotroTransit = () => {
         .from('stops')
         .select('*')
         .eq('approved', true)
+        .eq('user_location_to_create', false)
         .ilike('name', `%${query}%`)
         .limit(5);
 
@@ -1474,6 +1501,7 @@ const GhanaTrotroTransit = () => {
         .from('stops')
         .select('id, name, latitude, longitude')
         .eq('approved', true)
+        .eq('user_location_to_create', false)
         .ilike('name', `%${query.trim()}%`)
         .limit(10);
       if (error) throw error;
@@ -3457,6 +3485,7 @@ const GhanaTrotroTransit = () => {
         onMapTap={handleMapTap}
         recenterUserTrigger={recenterUserTrigger}
         recenterRouteTrigger={recenterRouteTrigger}
+        onPhotoLightboxChange={setIsPhotoLightboxOpen}
       />
 
       {/* App Title in Top Left */}
@@ -3467,17 +3496,20 @@ const GhanaTrotroTransit = () => {
       {/* Location Permission Nudge — shown when the user's location marker
           still isn't on the map (never granted, denied, or unavailable),
           encouraging them to turn it on for a better experience. */}
-      {showLocationPermissionBanner && (
+      {showLocationPermissionBanner && !isPhotoLightboxOpen && (
         <div className="location-permission-banner">
           <MapPin size={18} color={COLORS.primary} />
           <p className="location-permission-text">
-            Turn on location for a better experience, see your position and nearby stops on the map.
+            {locationPermissionDenied
+              ? 'Location is blocked for this app. Enable it in your browser or device settings, then tap Enable again.'
+              : 'Turn on location for a better experience, see your position and nearby stops on the map.'}
           </p>
           <button
             className="location-permission-enable-button"
             onClick={handleEnableLocation}
+            disabled={isRequestingLocation}
           >
-            Enable
+            {isRequestingLocation ? 'Enabling…' : 'Enable'}
           </button>
           <button
             className="location-permission-dismiss-button"
@@ -3489,92 +3521,98 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
-      {/* Top Right Buttons */}
-      <button
-        className="profile-button"
-        onClick={() => setShowProfileModal(true)}
-      >
-        <User size={24} color="#FFFFFF" />
-      </button>
-
-      {/* Explore — opens the slide-in drawer with Popular Routes, Routes
-          Around You, and Locations Nearby. */}
-      <button
-        className="hamburger-button"
-        onClick={openExploreDrawer}
-        aria-label="Explore routes and nearby stops"
-      >
-        <Menu size={20} color="#ffffff" />
-      </button>
-
-      <button
-        className="plus-button"
-        onClick={() => { setDownloadAppModalReason('createRoute'); setShowDownloadAppModal(true); }}
-      >
-        <Plus size={20} color="#FFFFFF" />
-      </button>
-
-      {/* Get the App — sits right below the plus button, white background
-          so it stands out from the solid purple buttons around it. */}
-      <button
-        className="get-app-button"
-        onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
-        aria-label="Get the app"
-      >
-        <svg fill="var(--primary-color)" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
-      </button>
-
-      {/* Stacked bottom-right action buttons. These sit in a single flex
-          column so that whichever ones are conditionally hidden (Google
-          Maps, Locate Me, Recenter Route) never leave a gap behind them —
-          the remaining buttons simply close the space. Rendered in
-          bottom-to-top DOM order since the container is column-reverse. */}
-      <div className="map-action-stack">
-        {/* Info Button with conditional opacity */}
-        <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
-          <Info size={20} color="#FFFFFF" />
-        </button>
-
-        {/* Locate Me — only shown when we have a location fix AND that dot
-            isn't currently visible on screen; tapping it pans/zooms the map
-            back to it rather than re-requesting permission. */}
-        {userLocation && !isUserLocationVisible && (
+      {/* Top Right Buttons — hidden while a stop's photo lightbox is open,
+          so they don't float on top of it. The lightbox's own "+ Add photo"
+          button lives inside the map iframe and is unaffected by this. */}
+      {!isPhotoLightboxOpen && (
+        <>
           <button
-            className="locate-button"
-            onClick={() => setRecenterUserTrigger((t) => t + 1)}
-            aria-label="Show my location"
+            className="profile-button"
+            onClick={() => setShowProfileModal(true)}
           >
-            <Navigation size={20} color="#FFFFFF" />
+            <User size={24} color="#FFFFFF" />
           </button>
-        )}
 
-        {/* Open in Google Maps — only once a route has actually been found;
-            opens the same stop sequence as turn-by-turn directions. */}
-        {selectedRoute && (
+          {/* Explore — opens the slide-in drawer with Popular Routes, Routes
+              Around You, and Locations Nearby. */}
           <button
-            className="google-maps-button"
-            onClick={openRouteInGoogleMaps}
-            aria-label="Open route in Google Maps"
+            className="hamburger-button"
+            onClick={openExploreDrawer}
+            aria-label="Explore routes and nearby stops"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="100" height="100" viewBox="0 0 64 64">
+            <Menu size={20} color="#ffffff" />
+          </button>
+
+          <button
+            className="plus-button"
+            onClick={() => { setDownloadAppModalReason('createRoute'); setShowDownloadAppModal(true); }}
+          >
+            <Plus size={20} color="#FFFFFF" />
+          </button>
+
+          {/* Get the App — sits right below the plus button, white background
+              so it stands out from the solid purple buttons around it. */}
+          <button
+            className="get-app-button"
+            onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
+            aria-label="Get the app"
+          >
+            <svg fill="var(--primary-color)" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
+          </button>
+
+          {/* Stacked bottom-right action buttons. These sit in a single flex
+              column so that whichever ones are conditionally hidden (Google
+              Maps, Locate Me, Recenter Route) never leave a gap behind them —
+              the remaining buttons simply close the space. Rendered in
+              bottom-to-top DOM order since the container is column-reverse. */}
+          <div className="map-action-stack">
+            {/* Info Button with conditional opacity */}
+            <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
+              <Info size={20} color="#FFFFFF" />
+            </button>
+
+            {/* Locate Me — only shown when we have a location fix AND that dot
+                isn't currently visible on screen; tapping it pans/zooms the map
+                back to it rather than re-requesting permission. */}
+            {userLocation && !isUserLocationVisible && (
+              <button
+                className="locate-button"
+                onClick={() => setRecenterUserTrigger((t) => t + 1)}
+                aria-label="Show my location"
+              >
+                <Navigation size={20} color="#FFFFFF" />
+              </button>
+            )}
+
+            {/* Open in Google Maps — only once a route has actually been found;
+                opens the same stop sequence as turn-by-turn directions. */}
+            {selectedRoute && (
+              <button
+                className="google-maps-button"
+                onClick={openRouteInGoogleMaps}
+                aria-label="Open route in Google Maps"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="100" height="100" viewBox="0 0 64 64">
 <path fill="#48b564" d="M35.76,26.36h0.01c0,0-3.77,5.53-6.94,9.64c-2.74,3.55-3.54,6.59-3.77,8.06	C24.97,44.6,24.53,45,24,45s-0.97-0.4-1.06-0.94c-0.23-1.47-1.03-4.51-3.77-8.06c-0.42-0.55-0.85-1.12-1.28-1.7L28.24,22l8.33-9.88	C37.49,14.05,38,16.21,38,18.5C38,21.4,37.17,24.09,35.76,26.36z"></path><path fill="#fcc60e" d="M28.24,22L17.89,34.3c-2.82-3.78-5.66-7.94-5.66-7.94h0.01c-0.3-0.48-0.57-0.97-0.8-1.48L19.76,15	c-0.79,0.95-1.26,2.17-1.26,3.5c0,3.04,2.46,5.5,5.5,5.5C25.71,24,27.24,23.22,28.24,22z"></path><path fill="#2c85eb" d="M28.4,4.74l-8.57,10.18L13.27,9.2C15.83,6.02,19.69,4,24,4C25.54,4,27.02,4.26,28.4,4.74z"></path><path fill="#ed5748" d="M19.83,14.92L19.76,15l-8.32,9.88C10.52,22.95,10,20.79,10,18.5c0-3.54,1.23-6.79,3.27-9.3	L19.83,14.92z"></path><path fill="#5695f6" d="M28.24,22c0.79-0.95,1.26-2.17,1.26-3.5c0-3.04-2.46-5.5-5.5-5.5c-1.71,0-3.24,0.78-4.24,2L28.4,4.74	c3.59,1.22,6.53,3.91,8.17,7.38L28.24,22z"></path>
 </svg>
-          </button>
-        )}
+              </button>
+            )}
 
-        {/* Recenter Route — only shown once a route is selected AND some
-            part of it has been panned off-screen; tapping it flies the map
-            back to fit the whole route, same as the initial auto-fit. */}
-        {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
-          <button
-            className="route-button"
-            onClick={() => setRecenterRouteTrigger((t) => t + 1)}
-            aria-label="Recenter on route"
-          >
-            <Map size={18} color="#FFFFFF" />
-          </button>
-        )}
-      </div>
+            {/* Recenter Route — only shown once a route is selected AND some
+                part of it has been panned off-screen; tapping it flies the map
+                back to fit the whole route, same as the initial auto-fit. */}
+            {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
+              <button
+                className="route-button"
+                onClick={() => setRecenterRouteTrigger((t) => t + 1)}
+                aria-label="Recenter on route"
+              >
+                <Map size={18} color="#FFFFFF" />
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       {/*
        {user && (
@@ -3627,8 +3665,9 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
-      {/* Floating Search Button - Only show when bottom sheet is closed */}
-      {!showBottomSheet && (
+      {/* Floating Search Button - Only show when bottom sheet is closed, and
+          hidden while the photo lightbox is open. */}
+      {!showBottomSheet && !isPhotoLightboxOpen && (
         <div className="floating-button">
           <button
             className="search-button-inner"
