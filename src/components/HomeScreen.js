@@ -506,6 +506,11 @@ const GhanaTrotroTransit = () => {
     setCookiesAccepted(true);
     setCookiesDeclined(false);
     setShowCookieInfoModal(false);
+    // Allow GA to start setting analytics cookies now that consent is given
+    // (see the default 'denied' state set in public/index.html).
+    if (window.gtag) {
+      window.gtag('consent', 'update', { analytics_storage: 'granted' });
+    }
   }, []);
 
   const handleDeclineCookies = useCallback(() => {
@@ -895,6 +900,7 @@ const GhanaTrotroTransit = () => {
   const [reportSuccess, setReportSuccess] = useState(false);
   // true = general report (from profile, no route attached); false = route report
   const [isGeneralReport, setIsGeneralReport] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Map layer mode: 'normal' | 'satellite'
   const [mapMode, setMapMode] = useState('normal');
@@ -1819,6 +1825,54 @@ const GhanaTrotroTransit = () => {
     }
   }, [forgotPasswordEmail]);
 
+  const handleShareRoute = useCallback(async () => {
+    if (!selectedRoute) return;
+
+    const stopCount = selectedRoute.is_composite
+      ? (selectedRoute.compositionSegments?.length ?? 0) + 1
+      : (selectedRoute.stops?.length ?? 0);
+
+    const startName = selectedRoute.stops?.[0]?.name;
+    const destName = selectedRoute.stops?.[selectedRoute.stops.length - 1]?.name;
+
+    const shareText = `${selectedRoute.name || 'Trotro Route'} • ${stopCount} stops • GH₵ ${selectedRoute.total_fare}`;
+    // "id" pins the link to this exact route (precise — no ambiguity if
+    // other routes share the same start/end stop names). "from"/"to" ride
+    // along as a fallback so the link still works via a normal search if
+    // that specific route is ever removed. See the deep-link useEffect.
+    const params = new URLSearchParams();
+    if (selectedRoute.id) params.set('id', selectedRoute.id);
+    if (startName) params.set('from', startName);
+    if (destName) params.set('to', destName);
+
+    const shareUrl = params.toString()
+      ? `https://gtt-web.nxnx.tech/?${params.toString()}`
+      : `https://gtt-web.nxnx.tech/`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: selectedRoute.name || 'Trotro Route',
+          text: shareText,
+          url: shareUrl,
+        });
+      } catch (err) {
+        // User cancelled the share sheet or share failed silently — no action needed
+        if (err?.name !== 'AbortError') {
+          console.error('Share failed:', err);
+        }
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2000);
+      } catch (err) {
+        alert('Unable to share route. Please try copying the link manually.');
+      }
+    }
+  }, [selectedRoute]);
+
   const handleSubmitReport = useCallback(async () => {
     if (!reportReason) return;
     setReportSubmitting(true);
@@ -2164,8 +2218,13 @@ const GhanaTrotroTransit = () => {
   }, [user]);
 
   // Update the findRoutes function
-  const findRoutes = useCallback(async () => {
-    if (!startPoint || !destination) {
+  // Accepts optional overrideStart/overrideDest so it can be driven by a
+  // shared deep link (?from=...&to=...) as well as the search form inputs.
+  const findRoutes = useCallback(async (overrideStart, overrideDest) => {
+    const searchStart = overrideStart ?? startPoint;
+    const searchDest  = overrideDest ?? destination;
+
+    if (!searchStart || !searchDest) {
       alert('Error: Please enter both start and destination points');
       return;
     }
@@ -2174,10 +2233,10 @@ const GhanaTrotroTransit = () => {
     setIsFindingRoutes(true);
 
     // Save to search history
-    await saveSearchHistory(startPoint, destination);
+    await saveSearchHistory(searchStart, searchDest);
 
     try {
-      console.log('Searching for routes from:', startPoint, 'to:', destination);
+      console.log('Searching for routes from:', searchStart, 'to:', searchDest);
       
       // Fetch routes with stops
       const { data: routesData, error } = await supabase
@@ -2202,7 +2261,7 @@ const GhanaTrotroTransit = () => {
       console.log('Fetched routes from database:', routesData);
 
       if (!routesData || routesData.length === 0) {
-        await logUnmatchedSearch(startPoint, destination);
+        await logUnmatchedSearch(searchStart, searchDest);
         setShowRouteNotFoundModal(true);
         return;
       }
@@ -2217,8 +2276,8 @@ const GhanaTrotroTransit = () => {
         
         const firstStopName = firstStop.stops.name.toLowerCase();
         const lastStopName = lastStop.stops.name.toLowerCase();
-        const userStart = startPoint.toLowerCase();
-        const userDest = destination.toLowerCase();
+        const userStart = searchStart.toLowerCase();
+        const userDest = searchDest.toLowerCase();
         
         const startMatches = firstStopName.includes(userStart) || userStart.includes(firstStopName);
         const destMatches = lastStopName.includes(userDest) || userDest.includes(lastStopName);
@@ -2229,7 +2288,7 @@ const GhanaTrotroTransit = () => {
       console.log('Matching routes found:', matchingRoutes.length);
 
       if (matchingRoutes.length === 0) {
-        await logUnmatchedSearch(startPoint, destination);
+        await logUnmatchedSearch(searchStart, searchDest);
         setShowRouteNotFoundModal(true);
         return;
       }
@@ -2258,7 +2317,7 @@ const GhanaTrotroTransit = () => {
     } finally {
       setIsFindingRoutes(false);
     }
-  }, [user, startPoint, destination, saveSearchHistory, fetchRouteInfo, logUnmatchedSearch]);
+  }, [startPoint, destination, saveSearchHistory, fetchRouteInfo, logUnmatchedSearch]);
 
   // ── Explore drawer data ──────────────────────────────────────────────
   // Pulls a batch of routes (same shape as the search flow, via
@@ -2369,6 +2428,49 @@ const GhanaTrotroTransit = () => {
     if (userLocation) withDistance.sort((a, b) => a.distance - b.distance);
     return withDistance.slice(0, 10);
   }, [nearbyStops, userLocation]);
+
+  // Fetches a single route by its id and opens it directly in the bottom
+  // sheet — used by the id-based deep link (see handleShareRoute / the
+  // deep-link useEffect) so a shared link opens the exact route that was
+  // shared, not just any route matching the same start/end stop names.
+  const fetchRouteById = useCallback(async (routeId) => {
+    if (!routeId) return null;
+
+    try {
+      const { data: routeData, error } = await supabase
+        .from('routes')
+        .select(`
+          *,
+          route_stops(
+            stop_order,
+            fare_to_next,
+            distance_to_next,
+            stops(*)
+          )
+        `)
+        .eq('id', routeId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!routeData) return null;
+
+      const formatted = await formatRoute(routeData);
+
+      setRoutes([formatted]);
+      setSelectedRoute(formatted);
+      setBottomSheetContent('route');
+      setBottomSheetState('route-details');
+      setShowBottomSheet(true);
+
+      await fetchRouteInfo(formatted.id);
+      setLastUpdateTime(new Date());
+
+      return formatted;
+    } catch (err) {
+      console.error('Error loading shared route by id:', err);
+      return null;
+    }
+  }, [fetchRouteInfo]);
 
   // Selecting a route from the drawer mirrors the normal search-result
   // selection flow: it becomes the active route on the map and its details
@@ -2652,6 +2754,48 @@ const GhanaTrotroTransit = () => {
     };
   }, [checkUser, fetchUserProfile, fetchUserHistory, setupRealtimeSubscriptions, stopRealtimeSubscriptions]);
 
+  // If cookies were already accepted on a previous visit, grant GA consent
+  // immediately on load instead of waiting for a banner click that won't
+  // happen again this session.
+  useEffect(() => {
+    if (cookiesAccepted && window.gtag) {
+      window.gtag('consent', 'update', { analytics_storage: 'granted' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Deep-link handling ──────────────────────────────────────────────────
+  // Opens a route directly when the app is loaded with a shared link (see
+  // handleShareRoute). Prefers ?id=... for a precise, unambiguous match to
+  // the exact route that was shared; falls back to ?from=X&to=Y (running
+  // the normal route search) if there's no id, or if that route id can no
+  // longer be found (e.g. it was removed). Runs once on mount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get('id');
+    const sharedFrom = params.get('from');
+    const sharedTo = params.get('to');
+
+    const openFromNames = () => {
+      if (sharedFrom && sharedTo) {
+        setStartPoint(sharedFrom);
+        setDestination(sharedTo);
+        findRoutes(sharedFrom, sharedTo);
+      }
+    };
+
+    if (sharedId) {
+      fetchRouteById(sharedId).then(route => {
+        if (!route) openFromNames();
+      });
+    } else {
+      openFromNames();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+
   // When app regains focus or becomes visible again, ensure we reconnect
   // and refresh current data without resetting user input or UI state.
   useEffect(() => {
@@ -2728,7 +2872,10 @@ const GhanaTrotroTransit = () => {
   }, [selectedRoute, fetchRouteInfo]);
 
   // Render search form with realtime indicator
-  const renderSearchForm = useCallback(() => (
+  const renderSearchForm = useCallback(() => {
+    const canFindRoutes = startPoint.trim() !== '' && destination.trim() !== '';
+
+    return (
     <div className="search-section">
       <div className="scroll-view">
         <div className="sheet-header">
@@ -2844,8 +2991,8 @@ const GhanaTrotroTransit = () => {
 
           <button 
             className={`search-button ${isFindingRoutes ? 'search-button-loading' : ''}`} 
-            onClick={findRoutes}
-            disabled={isFindingRoutes}
+            onClick={() => canFindRoutes && findRoutes()}
+            disabled={isFindingRoutes || !canFindRoutes}
           >
             {isFindingRoutes ? (
               <>
@@ -2931,7 +3078,8 @@ const GhanaTrotroTransit = () => {
         )}
       </div>
     </div>
-  ), [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory, showRecentSearches, toggleRecentSearches]);
+  );
+  }, [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory, showRecentSearches, toggleRecentSearches]);
 
   // Render route details with realtime indicator
   const renderRouteDetails = useCallback(() => (
@@ -2943,9 +3091,9 @@ const GhanaTrotroTransit = () => {
         <div className="header-content">
           <h2 className="route-name">{selectedRoute?.name || 'Route Details'}</h2>
 
-          <p className="route-subtitle">
+          {/*<p className="route-subtitle">
             Ghana Trotro Transit Route
-          </p>
+          </p>*/}
         </div>
         <div className="header-buttons">
           <button className="new-search-button" onClick={resetSearch} title="New Search">
@@ -3036,6 +3184,23 @@ const GhanaTrotroTransit = () => {
                     ? `${selectedRoute.compositionSegments.length + 1} stops`
                     : `${selectedRoute.stops.length} stops`}
                 </span>
+                <button
+                  className="share-inline-button"
+                  onClick={handleShareRoute}
+                  title="Share this route"
+                >
+                  {shareCopied ? (
+                    <>
+                      <Check size={13} color="#000000" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 size={13} color="#000000" />
+                      <span>Share</span>
+                    </>
+                  )}
+                </button>
                 <button
                   className="report-inline-button"
                   onClick={() => { setIsGeneralReport(false); setShowReportModal(true); }}
@@ -3203,7 +3368,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
     </div>
-  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime, setShowReportModal, setIsGeneralReport]);
+  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime, setShowReportModal, setIsGeneralReport, handleShareRoute, shareCopied]);
 
   // Render route info with realtime indicator
   const renderRouteInfo = useCallback(() => (
