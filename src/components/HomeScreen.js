@@ -4791,7 +4791,7 @@ const GhanaTrotroTransit = () => {
                     <span className="contact-text">
                       <a
                         className="contact-text-help"
-                        href="mailto:info@nxnx.tech?subject=Inquiry%20from%20GTT%20Website&body=Hello%20GTT%20Team%2C%0A%0AI%20would%20like%20to%20make%20an%20inquiry."
+                        href="mailto:info@nxnx.tech?subject=Inquiry%20from%20GTT%20Web&body=Hello%20GTT%20Team%2C%0A%0AI%20would%20like%20to%20make%20an%20inquiry."
                       >
                         info@nxnx.tech
                       </a>
