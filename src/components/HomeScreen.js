@@ -4789,7 +4789,7 @@ const GhanaTrotroTransit = () => {
                   <div className="contact-item">
                     <Mail size={16} color={COLORS.primary} />
                     <span className="contact-text">
-                      <a className='contact-text-help' href='mailto:nxnxtech@gmail.com'>nxnxtech@gmail.com</a>
+                      <a className='contact-text-help' href='mailto:info@nxnx.tech'>info@nxnx.tech</a>
                     </span>
                   </div>
                   <div className="contact-item">
