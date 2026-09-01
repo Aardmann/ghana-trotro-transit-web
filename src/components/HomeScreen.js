@@ -2766,8 +2766,12 @@ const GhanaTrotroTransit = () => {
 
   // ── Deep-link handling ──────────────────────────────────────────────────
   // Opens a route directly when the app is loaded with a shared link (see
-  // handleShareRoute). Prefers ?id=... for a precise, unambiguous match to
-  // the exact route that was shared; falls back to ?from=X&to=Y (running
+  // handleShareRoute). On mobile, first tries handing off to the installed
+  // app via its custom-scheme link; if that doesn't open anything within a
+  // short window (no app installed, or the OS blocked the scheme), or on
+  // desktop where there's nothing to hand off to, the route opens here in
+  // the browser instead. Prefers ?id=... for a precise, unambiguous match
+  // to the exact route that was shared; falls back to ?from=X&to=Y (running
   // the normal route search) if there's no id, or if that route id can no
   // longer be found (e.g. it was removed). Runs once on mount.
   useEffect(() => {
@@ -2775,6 +2779,8 @@ const GhanaTrotroTransit = () => {
     const sharedId = params.get('id');
     const sharedFrom = params.get('from');
     const sharedTo = params.get('to');
+
+    if (!sharedId && !(sharedFrom && sharedTo)) return undefined;
 
     const openFromNames = () => {
       if (sharedFrom && sharedTo) {
@@ -2784,13 +2790,53 @@ const GhanaTrotroTransit = () => {
       }
     };
 
-    if (sharedId) {
-      fetchRouteById(sharedId).then(route => {
-        if (!route) openFromNames();
-      });
-    } else {
-      openFromNames();
+    const openInWeb = () => {
+      if (sharedId) {
+        fetchRouteById(sharedId).then(route => {
+          if (!route) openFromNames();
+        });
+      } else {
+        openFromNames();
+      }
+    };
+
+    // Only mobile devices plausibly have the app installed - desktop
+    // browsers have nothing to hand off to, and attempting the custom
+    // scheme there just risks a browser "open app?" prompt or a
+    // broken-link error page for no benefit.
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isMobile) {
+      openInWeb();
+      return undefined;
     }
+
+    const appParams = new URLSearchParams();
+    if (sharedId) appParams.set('id', sharedId);
+    if (sharedFrom) appParams.set('from', sharedFrom);
+    if (sharedTo) appParams.set('to', sharedTo);
+    const appUrl = `ghanatrotrotransit://route?${appParams.toString()}`;
+
+    // If the app opens, the browser tab is backgrounded (this fires) well
+    // before the fallback timer below runs, so we never fall through to
+    // the web version.
+    let handedOff = false;
+    const onVisibilityChange = () => {
+      if (document.hidden) handedOff = true;
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const fallbackTimer = setTimeout(() => {
+      if (!handedOff && !document.hidden) {
+        openInWeb();
+      }
+    }, 1500);
+
+    window.location.href = appUrl;
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
