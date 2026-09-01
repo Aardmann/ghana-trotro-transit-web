@@ -2814,7 +2814,12 @@ const GhanaTrotroTransit = () => {
     if (sharedId) appParams.set('id', sharedId);
     if (sharedFrom) appParams.set('from', sharedFrom);
     if (sharedTo) appParams.set('to', sharedTo);
-    const appUrl = `ghanatrotrotransit://route?${appParams.toString()}`;
+    // No path segment here (just scheme://?params) - the app uses Expo
+    // Router, which treats anything after "scheme://" and before "?" as a
+    // path to match against a file in app/. A "route" segment with no
+    // matching app/route.js resolves to +not-found instead of opening the
+    // app on the right screen, so this points at the root path instead.
+    const appUrl = `ghanatrotrotransit://?${appParams.toString()}`;
 
     // If the app opens, the browser tab is backgrounded (this fires) well
     // before the fallback timer below runs, so we never fall through to
