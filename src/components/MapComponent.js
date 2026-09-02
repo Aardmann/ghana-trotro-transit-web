@@ -990,7 +990,7 @@ function drawUserLocation() {
   if (!mapReady || !userLoc) return;
 
   var wrap = document.createElement('div');
-  wrap.style.cssText = 'width:22px;height:22px;position:relative;';
+  wrap.style.cssText = 'width:22px;height:22px;position:relative; z-index:1000;';
 
   var pulse = document.createElement('div');
   pulse.style.cssText =

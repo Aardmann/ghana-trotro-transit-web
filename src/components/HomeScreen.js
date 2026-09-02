@@ -9,7 +9,7 @@ import {
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
   Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
-  Menu, TrendingUp, Compass
+  Menu, TrendingUp, Compass, MessageCircle
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -44,7 +44,57 @@ import contributorBadgeIcon from '../assets/trotro-vehicle.png';
 // Users with more than this many contributions get the trotro badge next to their name.
 const CONTRIBUTOR_BADGE_THRESHOLD = 5;
 
-const AuthForm = ({ onSignIn, onSignUp, authLoading, onForgotPasswordOpen }) => {
+// Standard multi-color Google "G" mark, used on the "Continue with Google" button.
+const GoogleIcon = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
+    <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" />
+    <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" />
+    <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" />
+  </svg>
+);
+
+// Brand marks used on the route Share sheet — self-contained circles (bg +
+// glyph baked in) so they drop straight into a row without extra styling.
+const WhatsAppIcon = ({ size = 26 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="12" fill="#25D366" />
+    <path
+      fill="#FFFFFF"
+      d="M12 6.3a5.7 5.7 0 0 0-4.86 8.66l.14.23-.62 2.27 2.33-.61.22.13A5.7 5.7 0 1 0 12 6.3Zm-2.1 2.6c-.16-.36-.33-.37-.48-.38h-.4a.78.78 0 0 0-.56.26c-.2.2-.75.73-.75 1.79s.77 2.08.87 2.22c.1.15 1.48 2.38 3.66 3.24 1.81.71 2.18.57 2.57.53.39-.04 1.26-.51 1.44-1.01.18-.5.18-.92.13-1.01-.05-.09-.18-.15-.38-.25s-1.26-.62-1.46-.69c-.2-.07-.34-.11-.48.11-.14.22-.55.69-.68.83-.13.14-.25.16-.46.05-.21-.1-.87-.32-1.65-1.02-.61-.55-1.02-1.22-1.14-1.43-.12-.21-.01-.32.09-.43.09-.09.21-.24.31-.35.1-.12.14-.2.21-.34.07-.14.03-.26-.02-.36-.05-.1-.47-1.16-.66-1.6Z"
+    />
+  </svg>
+);
+
+const FacebookIcon = ({ size = 26 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="12" fill="#1877F2" />
+    <path
+      fill="#FFFFFF"
+      d="M13.5 21v-7.2h2.4l.36-2.8h-2.76V9.2c0-.81.22-1.36 1.39-1.36h1.48V5.34C15.86 5.24 15.02 5.16 14.06 5.16c-2.05 0-3.45 1.25-3.45 3.55v1.99H8.2v2.8h2.41V21h2.89Z"
+    />
+  </svg>
+);
+
+const InstagramIcon = ({ size = 26 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <defs>
+      <linearGradient id="igShareGradient" x1="0" y1="24" x2="24" y2="0">
+        <stop offset="0%" stopColor="#FEDA75" />
+        <stop offset="30%" stopColor="#FA7E1E" />
+        <stop offset="60%" stopColor="#D62976" />
+        <stop offset="85%" stopColor="#962FBF" />
+        <stop offset="100%" stopColor="#4F5BD5" />
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="24" height="24" rx="7" fill="url(#igShareGradient)" />
+    <rect x="6" y="6" width="12" height="12" rx="4" stroke="#FFFFFF" strokeWidth="1.6" fill="none" />
+    <circle cx="12" cy="12" r="3.1" stroke="#FFFFFF" strokeWidth="1.6" fill="none" />
+    <circle cx="16.2" cy="7.8" r="0.9" fill="#FFFFFF" />
+  </svg>
+);
+
+const AuthForm = ({ onSignIn, onSignUp, onGoogleSignIn, authLoading, googleAuthLoading, onForgotPasswordOpen }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -274,6 +324,26 @@ const AuthForm = ({ onSignIn, onSignUp, authLoading, onForgotPasswordOpen }) => 
           .
         </p>
       )}
+
+      <div className="ios-auth-divider-row">
+        <div className="ios-auth-divider-line" />
+        <span className="ios-auth-divider-label">or</span>
+        <div className="ios-auth-divider-line" />
+      </div>
+
+      <button
+        type="button"
+        className={`ios-google-btn${googleAuthLoading ? ' ios-google-btn--disabled' : ''}`}
+        onClick={onGoogleSignIn}
+        disabled={googleAuthLoading || authLoading}
+      >
+        {googleAuthLoading ? (
+          <span className="ios-google-spinner" />
+        ) : (
+          <GoogleIcon size={18} />
+        )}
+        <span>{googleAuthLoading ? 'Redirecting…' : 'Continue with Google'}</span>
+      </button>
 
       {!isSignUp && (
         <>
@@ -532,6 +602,16 @@ const GhanaTrotroTransit = () => {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+  // Set when a brand-new Google sign-up comes back from Google without a
+  // usable name (no given_name/family_name/name on the Google profile).
+  // While this is set, the profile modal shows a "finish creating your
+  // account" name form instead of the normal signed-in view - the account
+  // isn't considered complete until first/last name are saved.
+  const [pendingGoogleUser, setPendingGoogleUser] = useState(null);
+  const [completeProfileFirstName, setCompleteProfileFirstName] = useState('');
+  const [completeProfileLastName, setCompleteProfileLastName] = useState('');
+  const [completingGoogleProfile, setCompletingGoogleProfile] = useState(false);
 
   // ── User location (requires cookie/location consent) ────────────────
   const [userLocation, setUserLocation] = useState(null);
@@ -814,6 +894,7 @@ const GhanaTrotroTransit = () => {
   const [bottomSheetContent, setBottomSheetContent] = useState('search'); // 'search' or 'route'
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSearchHistoryModal, setShowSearchHistoryModal] = useState(false);
+  const [showCreatedRoutesModal, setShowCreatedRoutesModal] = useState(false);
   const [showRouteNotFoundModal, setShowRouteNotFoundModal] = useState(false);
   const [showSignOutConfirmModal, setShowSignOutConfirmModal] = useState(false);
   const [signOutLoading, setSignOutLoading] = useState(false);
@@ -879,6 +960,12 @@ const GhanaTrotroTransit = () => {
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
   const [searchHistory, setSearchHistory] = useState(() => getSearchHistoryFromCookie());
 
+  // Delete-created-route confirmation — holds { routeId, title, message,
+  // confirmText } while the confirm modal is open, built by
+  // requestDeleteCreatedRoute() and acted on by deleteCreatedRoute().
+  const [routeDeleteConfirm, setRouteDeleteConfirm] = useState(null);
+  const [deletingRouteId, setDeletingRouteId] = useState(null);
+
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
   // Which flow triggered the download-app modal — lets the modal show the
@@ -901,6 +988,10 @@ const GhanaTrotroTransit = () => {
   // true = general report (from profile, no route attached); false = route report
   const [isGeneralReport, setIsGeneralReport] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  // Share sheet — replaces navigator.share with a fixed list of apps so the
+  // options are consistent everywhere instead of whatever the OS exposes.
+  const [showShareOptionsModal, setShowShareOptionsModal] = useState(false);
+  const [shareModalData, setShareModalData] = useState(null); // { title, text, url } | null
 
   // Map layer mode: 'normal' | 'satellite'
   const [mapMode, setMapMode] = useState('normal');
@@ -1039,6 +1130,11 @@ const GhanaTrotroTransit = () => {
     handleOverlayClick(e, () => setShowSearchHistoryModal(false));
   }, [handleOverlayClick]);
 
+  // Close created routes modal when clicking on overlay
+  const handleCreatedRoutesModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowCreatedRoutesModal(false));
+  }, [handleOverlayClick]);
+
   // Close route-not-found modal when clicking on overlay
   const handleRouteNotFoundModalOverlayClick = useCallback((e) => {
     handleOverlayClick(e, () => setShowRouteNotFoundModal(false));
@@ -1074,6 +1170,53 @@ const GhanaTrotroTransit = () => {
     } catch (error) {
       console.error('Error fetching user profile:', error);
     }
+  }, []);
+
+  // Google gives us given_name/family_name (or a single full "name" field
+  // as a fallback) on the auth user's user_metadata. Returns '' for either
+  // part when Google didn't share it - callers decide what to do about that.
+  const getGoogleNameParts = (newUser) => {
+    const meta = newUser.user_metadata || {};
+    const fullName = meta.full_name || meta.name || '';
+    const firstName = meta.given_name || fullName.split(' ')[0] || '';
+    const lastName = meta.family_name || fullName.split(' ').slice(1).join(' ') || '';
+    return { firstName, lastName };
+  };
+
+  // Writes first/last name (+ email) onto the users row for a Google
+  // sign-in - via upsert so it works whether the row was already created
+  // (e.g. by a DB trigger on auth.users) or not. Only ever called with a
+  // non-empty firstName/lastName, either straight from Google or from the
+  // "complete your account" form, and never overwrites names the person
+  // has since edited themselves unless explicitly passed in here.
+  const saveGoogleProfileNames = useCallback(async (newUser, firstName, lastName) => {
+    try {
+      const { error } = await supabase.from('users').upsert(
+        {
+          id: newUser.id,
+          first_name: firstName,
+          last_name: lastName,
+          email: newUser.email,
+        },
+        { onConflict: 'id' }
+      );
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error saving Google profile names:', error);
+      return false;
+    }
+  }, []);
+
+  // Mobile-only, best-effort handoff to the installed app right after a
+  // fresh Google sign-up. Unlike the shared-route-link handoff, there's no
+  // "open in web" fallback to run here - we're already sitting in the web
+  // app, so if the app isn't installed (or the OS blocks the scheme), the
+  // person just stays right here with nothing left to do.
+  const attemptAppHandoff = useCallback(() => {
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isMobile) return;
+    window.location.href = 'ghanatrotrotransit://';
   }, []);
 
   // Fetch user history
@@ -1191,6 +1334,96 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
+  // Works out the right confirmation copy for deleting a created route —
+  // pending submissions get an extra warning about losing the paid fee —
+  // then opens the confirm modal for deleteCreatedRoute() to act on.
+  // NOTE: `user_created_routes` rows don't carry a `status` column per the
+  // current schema, so `route.status` is undefined today and this will
+  // always fall through to the generic "Delete Route?" copy below. Wire a
+  // real status through (e.g. from route_creation_payments.payment_status,
+  // or routes.approved via main_route_id) for the pending-route warning to
+  // actually appear.
+  const requestDeleteCreatedRoute = useCallback((routeId) => {
+    if (!user) return;
+
+    const routeToDelete = createdRoutesHistory.find(r => r.id === routeId);
+    if (!routeToDelete) {
+      alert('Route not found.');
+      return;
+    }
+
+    const status = routeToDelete.status; // 'approved', 'rejected', or 'pending'
+    const isPending = status === 'pending';
+    const isApproved = status === 'approved';
+
+    let title, message, confirmText;
+
+    if (isApproved) {
+      title = 'Delete Route?';
+      message = `Are you sure you want to delete "${routeToDelete.route_name}"? This action cannot be undone.`;
+      confirmText = 'Delete';
+    } else if (isPending) {
+      title = 'Delete Pending Route';
+      message =
+        `"${routeToDelete.route_name}" is still waiting for admin approval. ` +
+        `If you delete it now, you will lose your submission and any future updates. ` +
+        `You will need to pay the fee again if you want to resubmit. ` +
+        `Are you sure you want to delete this pending route?`;
+      confirmText = 'Yes, Delete Pending Route';
+    } else {
+      // rejected or unknown status
+      title = 'Delete Route';
+      message = `Are you sure you want to delete "${routeToDelete.route_name}"? This action cannot be undone.`;
+      confirmText = 'Delete';
+    }
+
+    setRouteDeleteConfirm({ routeId, title, message, confirmText });
+  }, [user, createdRoutesHistory]);
+
+  // Performs the actual deletion once the user confirms in the modal: first
+  // nullifies the route_creation_payments reference (its route_id FK points
+  // at this row), then deletes the user_created_routes row itself, then
+  // updates local state to match.
+  const deleteCreatedRoute = useCallback(async (routeId) => {
+    if (!user) return;
+
+    setDeletingRouteId(routeId);
+    try {
+      // 1️⃣ Nullify the foreign key reference in payments
+      const { error: updateError } = await supabase
+        .from('route_creation_payments')
+        .update({ route_id: null })
+        .eq('route_id', routeId);
+
+      if (updateError) {
+        console.error('Failed to nullify payment reference:', updateError);
+        alert(
+          'Cannot delete route: unable to unlink payment records.\n\n' +
+          (updateError.message || 'Permission denied or network error.')
+        );
+        return;
+      }
+
+      // 2️⃣ Delete from user_created_routes
+      const { error: deleteError } = await supabase
+        .from('user_created_routes')
+        .delete()
+        .eq('id', routeId)
+        .eq('user_id', user.id);
+
+      if (deleteError) throw deleteError;
+
+      // 3️⃣ Update local state
+      setCreatedRoutesHistory(prev => prev.filter(item => item.id !== routeId));
+    } catch (error) {
+      console.error('Error deleting route:', error);
+      alert('Failed to delete route. Please try again.');
+    } finally {
+      setDeletingRouteId(null);
+      setRouteDeleteConfirm(null);
+    }
+  }, [user]);
+
   // Fetch stop suggestions
   const fetchSuggestions = useCallback(async (query, type) => {
     if (query.length < 2) {
@@ -1262,6 +1495,12 @@ const GhanaTrotroTransit = () => {
     }
   }, [fetchUserProfile]);
 
+  // Traditional email/password signup. Unlike Google sign-in, this flow is
+  // meant to land on the static "Account Created" success page - so that's
+  // set explicitly here via emailRedirectTo rather than relying on the
+  // project's Site URL default. That keeps this flow's destination correct
+  // independent of whatever Site URL/Redirect URLs end up configured for
+  // the Google flow.
   const handleSignUp = useCallback(async (email, password, firstName, lastName) => {
     setAuthLoading(true);
     try {
@@ -1272,7 +1511,8 @@ const GhanaTrotroTransit = () => {
           data: {
             first_name: firstName,
             last_name: lastName
-          }
+          },
+          emailRedirectTo: 'https://user-gtt.nxnx.tech/signup-success',
         }
       });
 
@@ -1287,6 +1527,70 @@ const GhanaTrotroTransit = () => {
       setAuthLoading(false);
     }
   }, []);
+
+  // Web OAuth flow: Supabase redirects the whole page to Google, then back to
+  // redirectTo. There's no token to handle here in JS - onAuthStateChange
+  // (see the effect below) picks up the new session automatically once the
+  // browser lands back on this app, so this just kicks off the redirect.
+  //
+  // redirectTo is explicitly this app's own origin (not a "signin-success"
+  // page) - that's intentional so Google sign-in lands straight back in the
+  // app instead of on a separate success page. That separate redirect page
+  // is only meant for the traditional email/password flow. NOTE: this only
+  // works if window.location.origin is added under Supabase Dashboard ->
+  // Authentication -> URL Configuration -> Redirect URLs; if it's missing
+  // from that allow-list, Supabase silently ignores redirectTo and falls
+  // back to the project's Site URL instead, which is likely how the
+  // signin-success page was ending up in the Google flow.
+  const handleGoogleSignIn = useCallback(async () => {
+    setGoogleAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      // No further code runs here on success - the browser navigates away.
+    } catch (error) {
+      alert('Google Sign In Error: ' + error.message);
+      setGoogleAuthLoading(false);
+    }
+  }, []);
+
+  // Submits the "finish creating your account" form shown to a brand-new
+  // Google user when Google didn't hand us a usable name. This is what
+  // actually completes the account - nothing else marks it as done.
+  const handleCompleteGoogleProfile = useCallback(async () => {
+    if (!pendingGoogleUser) return;
+
+    const firstName = completeProfileFirstName.trim();
+    const lastName = completeProfileLastName.trim();
+    if (!firstName || !lastName) {
+      alert('Error: Please enter both your first and last name');
+      return;
+    }
+
+    setCompletingGoogleProfile(true);
+    try {
+      const saved = await saveGoogleProfileNames(pendingGoogleUser, firstName, lastName);
+      if (!saved) {
+        alert('Something went wrong saving your name. Please try again.');
+        return;
+      }
+      await fetchUserProfile(pendingGoogleUser.id);
+      attemptAppHandoff();
+
+      setPendingGoogleUser(null);
+      setCompleteProfileFirstName('');
+      setCompleteProfileLastName('');
+      setShowWelcomeBanner(true);
+      setTimeout(() => setShowWelcomeBanner(false), 5000);
+    } finally {
+      setCompletingGoogleProfile(false);
+    }
+  }, [pendingGoogleUser, completeProfileFirstName, completeProfileLastName, saveGoogleProfileNames, fetchUserProfile, attemptAppHandoff]);
 
   // Opens the confirmation modal instead of signing out immediately
   const handleSignOut = useCallback(() => {
@@ -1825,23 +2129,51 @@ const GhanaTrotroTransit = () => {
     }
   }, [forgotPasswordEmail]);
 
-  const handleShareRoute = useCallback(async () => {
-    if (!selectedRoute) return;
+  // Shares a route via the Web Share API (falling back to copying a link).
+  // Pass no argument to share the currently open selectedRoute (the bottom
+  // sheet's Share button), or pass a user_created_routes record (from the
+  // Created Routes list) to share that instead — the two have different
+  // shapes, detected below. Builds the share text/link, then opens the
+  // in-app share sheet (see showShareOptionsModal) rather than the OS one.
+  const handleShareRoute = useCallback((routeOverride) => {
+    const route = routeOverride || selectedRoute;
+    if (!route) return;
 
-    const stopCount = selectedRoute.is_composite
-      ? (selectedRoute.compositionSegments?.length ?? 0) + 1
-      : (selectedRoute.stops?.length ?? 0);
+    // user_created_routes rows carry `route_name` (routes rows carry `name`),
+    // so its presence tells us which shape we were given.
+    const isCreatedRouteRecord = route.route_name !== undefined;
 
-    const startName = selectedRoute.stops?.[0]?.name;
-    const destName = selectedRoute.stops?.[selectedRoute.stops.length - 1]?.name;
+    let routeName, stopCount, startName, destName, shareId;
 
-    const shareText = `${selectedRoute.name || 'Trotro Route'} • ${stopCount} stops • GH₵ ${selectedRoute.total_fare}`;
+    if (isCreatedRouteRecord) {
+      routeName = route.route_name || 'Trotro Route';
+      // `stops` here is just the waypoints between start and destination,
+      // so total stops = waypoints + start + destination.
+      stopCount = (route.stops?.length ?? 0) + 2;
+      startName = route.start_point;
+      destName = route.destination;
+      // `id` on this record is the user_created_routes row, not a row in
+      // the public `routes` table the deep link resolves against — use
+      // main_route_id instead, which is only set once the route has been
+      // approved and published (falls back to from/to below otherwise).
+      shareId = route.main_route_id;
+    } else {
+      routeName = route.name || 'Trotro Route';
+      stopCount = route.is_composite
+        ? (route.compositionSegments?.length ?? 0) + 1
+        : (route.stops?.length ?? 0);
+      startName = route.stops?.[0]?.name;
+      destName = route.stops?.[route.stops.length - 1]?.name;
+      shareId = route.id;
+    }
+
+    const shareText = `${routeName} • ${stopCount} stops • GH₵ ${route.total_fare}`;
     // "id" pins the link to this exact route (precise — no ambiguity if
     // other routes share the same start/end stop names). "from"/"to" ride
     // along as a fallback so the link still works via a normal search if
     // that specific route is ever removed. See the deep-link useEffect.
     const params = new URLSearchParams();
-    if (selectedRoute.id) params.set('id', selectedRoute.id);
+    if (shareId) params.set('id', shareId);
     if (startName) params.set('from', startName);
     if (destName) params.set('to', destName);
 
@@ -1849,29 +2181,73 @@ const GhanaTrotroTransit = () => {
       ? `https://gtt-web.nxnx.tech/?${params.toString()}`
       : `https://gtt-web.nxnx.tech/`;
 
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: selectedRoute.name || 'Trotro Route',
-          text: shareText,
-          url: shareUrl,
-        });
-      } catch (err) {
-        // User cancelled the share sheet or share failed silently — no action needed
-        if (err?.name !== 'AbortError') {
-          console.error('Share failed:', err);
-        }
-      }
-    } else {
-      try {
-        await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
-        setShareCopied(true);
-        setTimeout(() => setShareCopied(false), 2000);
-      } catch (err) {
-        alert('Unable to share route. Please try copying the link manually.');
-      }
-    }
+    setShareModalData({ title: routeName, text: shareText, url: shareUrl });
+    setShowShareOptionsModal(true);
   }, [selectedRoute]);
+
+  // ── Share sheet destinations ──────────────────────────────────────────
+  const shareToWhatsApp = useCallback(() => {
+    if (!shareModalData) return;
+    const encoded = encodeURIComponent(`${shareModalData.text}\n${shareModalData.url}`);
+    window.open(`https://wa.me/?text=${encoded}`, '_blank', 'noopener,noreferrer');
+    setShowShareOptionsModal(false);
+  }, [shareModalData]);
+
+  const shareToMessages = useCallback(() => {
+    if (!shareModalData) return;
+    const body = encodeURIComponent(`${shareModalData.text}\n${shareModalData.url}`);
+    // iOS Messages expects "sms:&body=" while Android (and most others)
+    // expect "sms:?body=" — the leading separator is the only difference.
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    window.location.href = isIOS ? `sms:&body=${body}` : `sms:?body=${body}`;
+    setShowShareOptionsModal(false);
+  }, [shareModalData]);
+
+  const shareToFacebook = useCallback(() => {
+    if (!shareModalData) return;
+    // Facebook's sharer only reliably honors the "u" (link) param — "quote"
+    // is included as a best-effort prefill but Facebook may ignore it.
+    const params = new URLSearchParams({ u: shareModalData.url, quote: shareModalData.text });
+    window.open(`https://www.facebook.com/sharer/sharer.php?${params.toString()}`, '_blank', 'noopener,noreferrer');
+    setShowShareOptionsModal(false);
+  }, [shareModalData]);
+
+  const shareToInstagram = useCallback(async () => {
+    if (!shareModalData) return;
+    // Instagram has no web intent for prefilling a link share, so the most
+    // reliable path is to copy it and hand off to the app — the user pastes
+    // it into a DM, Story, or bio from there.
+    try {
+      await navigator.clipboard.writeText(`${shareModalData.text}\n${shareModalData.url}`);
+    } catch (err) {
+      // ignore — still try to open Instagram below
+    }
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+      window.location.href = 'instagram://app';
+      setTimeout(() => {
+        window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+      }, 800);
+    } else {
+      window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+    }
+    alert('Link copied — paste it into Instagram.');
+    setShowShareOptionsModal(false);
+  }, [shareModalData]);
+
+  const copyShareLink = useCallback(async () => {
+    if (!shareModalData) return;
+    try {
+      await navigator.clipboard.writeText(`${shareModalData.text}\n${shareModalData.url}`);
+      setShareCopied(true);
+      setTimeout(() => {
+        setShareCopied(false);
+        setShowShareOptionsModal(false);
+      }, 1200);
+    } catch (err) {
+      alert('Unable to copy link. Please try again.');
+    }
+  }, [shareModalData]);
 
   const handleSubmitReport = useCallback(async () => {
     if (!reportReason) return;
@@ -2711,7 +3087,7 @@ const GhanaTrotroTransit = () => {
   }, [showSwipeIndicator]);
 
   // Check if any modal or bottom sheet is open
-  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showRouteNotFoundModal || showExploreDrawer;
+  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showCreatedRoutesModal || showRouteNotFoundModal || showExploreDrawer;
 
   // Effects
   useEffect(() => {
@@ -2727,10 +3103,43 @@ const GhanaTrotroTransit = () => {
         await fetchUserHistory(newUser.id);
         
         if (event === 'SIGNED_IN') {
-          setShowWelcomeBanner(true);
-          setTimeout(() => setShowWelcomeBanner(false), 5000);
           // Setup realtime subscriptions after sign in
           setupRealtimeSubscriptions();
+
+          // Google doesn't tell us directly whether this was a sign-up or a
+          // sign-in - created_at and last_sign_in_at land within
+          // milliseconds of each other only on the very first sign-in, so a
+          // small gap between them is what marks a brand-new account.
+          const isGoogleUser = newUser.app_metadata?.provider === 'google';
+          const isFreshSignUp = isGoogleUser && newUser.created_at && newUser.last_sign_in_at &&
+            Math.abs(new Date(newUser.created_at).getTime() - new Date(newUser.last_sign_in_at).getTime()) < 10000;
+
+          if (isFreshSignUp) {
+            const { firstName, lastName } = getGoogleNameParts(newUser);
+            if (firstName && lastName) {
+              // Google gave us a real name - finish the account silently,
+              // same as before.
+              await saveGoogleProfileNames(newUser, firstName, lastName);
+              await fetchUserProfile(newUser.id); // pick up the names we just saved
+              setShowWelcomeBanner(true);
+              setTimeout(() => setShowWelcomeBanner(false), 5000);
+              attemptAppHandoff();
+            } else {
+              // Google didn't share a usable name - hold off on the welcome
+              // banner and ask for it instead. The account isn't "complete"
+              // until this is filled in and submitted.
+              setPendingGoogleUser(newUser);
+              setCompleteProfileFirstName('');
+              setCompleteProfileLastName('');
+              setShowGuestSignIn(false);
+              setShowProfileModal(true);
+            }
+          } else {
+            // Returning user (Google or email/password) - just sign them in
+            // and show the normal welcome banner, no extra screen.
+            setShowWelcomeBanner(true);
+            setTimeout(() => setShowWelcomeBanner(false), 5000);
+          }
         }
       } else {
         setUserProfile(null);
@@ -2752,7 +3161,7 @@ const GhanaTrotroTransit = () => {
       subscription?.unsubscribe();
       stopRealtimeSubscriptions();
     };
-  }, [checkUser, fetchUserProfile, fetchUserHistory, setupRealtimeSubscriptions, stopRealtimeSubscriptions]);
+  }, [checkUser, fetchUserProfile, fetchUserHistory, saveGoogleProfileNames, attemptAppHandoff, setupRealtimeSubscriptions, stopRealtimeSubscriptions]);
 
   // If cookies were already accepted on a previous visit, grant GA consent
   // immediately on load instead of waiting for a banner click that won't
@@ -3237,7 +3646,7 @@ const GhanaTrotroTransit = () => {
                 </span>
                 <button
                   className="share-inline-button"
-                  onClick={handleShareRoute}
+                  onClick={() => handleShareRoute()}
                   title="Share this route"
                 >
                   {shareCopied ? (
@@ -4058,7 +4467,7 @@ const GhanaTrotroTransit = () => {
           <div className="modal ios-profile-modal" ref={modalRef}>
             <div className="ios-modal-grabber"></div>
             <div className="modal-header ios-profile-header">
-              <h2 className="modal-title">Profile</h2>
+              <h2 className="modal-title">{pendingGoogleUser ? 'Finish Your Account' : 'Profile'}</h2>
               <div className="ios-profile-header-actions">
                 {!user && !showGuestSignIn && (
                   <button
@@ -4077,12 +4486,59 @@ const GhanaTrotroTransit = () => {
               </div>
             </div>
 
-            {!user && showGuestSignIn ? (
+            {pendingGoogleUser ? (
+              // Brand-new Google sign-up, but Google didn't share a name -
+              // the account isn't complete until this is submitted.
+              <div className="modal-content ios-profile-content">
+                <div className="ios-auth-header">
+                  <div className="ios-auth-icon">
+                    <User size={26} color="#FFFFFF" />
+                  </div>
+                  <h2 className="ios-auth-title">Almost done</h2>
+                  <p className="ios-auth-subtitle">
+                    Google didn't share a name for {pendingGoogleUser.email} - add yours to finish creating your account.
+                  </p>
+                </div>
+
+                <div className="ios-list-group ios-form-group">
+                  <div className="ios-auth-input-row">
+                    <User size={17} color="#8E8E93" />
+                    <input
+                      className="ios-auth-input"
+                      placeholder="First Name"
+                      value={completeProfileFirstName}
+                      onChange={(e) => setCompleteProfileFirstName(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="ios-list-divider" style={{ marginLeft: '41px' }}></div>
+                  <div className="ios-auth-input-row">
+                    <User size={17} color="#8E8E93" />
+                    <input
+                      className="ios-auth-input"
+                      placeholder="Last Name"
+                      value={completeProfileLastName}
+                      onChange={(e) => setCompleteProfileLastName(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  className={`ios-auth-submit ${completingGoogleProfile ? 'ios-auth-submit--disabled' : ''}`}
+                  onClick={handleCompleteGoogleProfile}
+                  disabled={completingGoogleProfile}
+                >
+                  {completingGoogleProfile ? 'Saving…' : 'Complete Account Creation'}
+                </button>
+              </div>
+            ) : !user && showGuestSignIn ? (
               <div className="modal-content ios-profile-content" ref={profileModalContentRef}>
                 <AuthForm
                   onSignIn={handleSignIn}
                   onSignUp={handleSignUp}
+                  onGoogleSignIn={handleGoogleSignIn}
                   authLoading={authLoading}
+                  googleAuthLoading={googleAuthLoading}
                   onForgotPasswordOpen={() => {
                     // Wait a tick for the panel to actually expand so
                     // scrollHeight reflects the new, taller content.
@@ -4148,6 +4604,26 @@ const GhanaTrotroTransit = () => {
                           <History size={16} color="#FFFFFF" />
                         </span>
                         <span className="ios-row-text">Search History</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+
+                      <div className="ios-list-divider"></div>
+
+                      <button
+                        className="ios-list-row"
+                        onClick={() => {
+                          if (!user) {
+                            setShowGuestSignIn(true);
+                            return;
+                          }
+                          setShowCreatedRoutesModal(true);
+                          setShowProfileModal(false);
+                        }}
+                      >
+                        <span className="ios-row-icon ios-row-icon--black">
+                          <Map size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Created Routes</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
                       </button>
                     </div>
@@ -5064,6 +5540,188 @@ const GhanaTrotroTransit = () => {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Created Routes Modal - Non-blocking */}
+      {showCreatedRoutesModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={handleCreatedRoutesModalOverlayClick}
+        >
+          <div className="modal ios-history-modal" ref={modalRef}>
+            <div className="ios-modal-grabber"></div>
+            <div className="modal-header ios-history-header">
+              <button
+                className="ios-modal-back-button"
+                onClick={() => {
+                  setShowCreatedRoutesModal(false);
+                  setShowProfileModal(true);
+                }}
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
+              <h2 className="modal-title">Created Routes</h2>
+              <button
+                className="close-button"
+                onClick={() => setShowCreatedRoutesModal(false)}
+              >
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content ios-history-content">
+              {createdRoutesHistory.length === 0 ? (
+                <div className="ios-empty-state">
+                  <div className="ios-empty-state-icon">
+                    <Map size={26} color="#8E8E93" />
+                  </div>
+                  <h3 className="ios-empty-state-title">No Created Routes</h3>
+                  <p className="ios-empty-state-text">
+                    Routes you create will appear here once they&apos;ve been submitted.
+                  </p>
+                </div>
+              ) : (
+                <div className="ios-list-group">
+                  {createdRoutesHistory.map((route, idx) => (
+                    <React.Fragment key={route.id}>
+                      <div className="ios-history-row">
+                        <div className="ios-history-row-main">
+                          <span className="ios-row-icon ios-row-icon--black">
+                            <Map size={15} color="#FFFFFF" />
+                          </span>
+                          <span className="ios-history-text">
+                            <span className="ios-history-route">
+                              {route.route_name}
+                            </span>
+                            <span className="ios-history-date">
+                              {route.start_point} → {route.destination}
+                              {route.created_at
+                                ? ` · ${new Date(route.created_at).toLocaleDateString()}`
+                                : ''}
+                            </span>
+                          </span>
+                        </div>
+                        <button
+                          className="ios-history-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleShareRoute(route);
+                          }}
+                          title="Share this route"
+                        >
+                          <Share2 size={14} color="#8E8E93" />
+                        </button>
+                        <button
+                          className="ios-history-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            requestDeleteCreatedRoute(route.id);
+                          }}
+                          disabled={deletingRouteId === route.id}
+                          title="Delete this route"
+                        >
+                          <Trash2 size={14} color="#FF3B30" />
+                        </button>
+                      </div>
+                      {idx < createdRoutesHistory.length - 1 && (
+                        <div className="ios-list-divider" style={{ marginLeft: '50px' }}></div>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Created Route Confirmation Modal ── */}
+      {routeDeleteConfirm && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setRouteDeleteConfirm(null); }}
+        >
+          <div className="modal sign-out-confirm-modal">
+            <div className="modal-header">
+              <button
+                className="close-button"
+                onClick={() => setRouteDeleteConfirm(null)}
+              >
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+            <div className="sign-out-confirm-content">
+              <div className="delete-account-warning-icon">
+                <AlertCircle size={32} color="#FF3B30" />
+              </div>
+              <h3 className="sign-out-confirm-title">{routeDeleteConfirm.title}</h3>
+              <p className="sign-out-confirm-msg">{routeDeleteConfirm.message}</p>
+              <button
+                className="delete-account-confirm-button"
+                onClick={() => deleteCreatedRoute(routeDeleteConfirm.routeId)}
+                disabled={deletingRouteId === routeDeleteConfirm.routeId}
+              >
+                {deletingRouteId === routeDeleteConfirm.routeId ? 'Deleting...' : routeDeleteConfirm.confirmText}
+              </button>
+              <button
+                className="sign-out-cancel-button"
+                onClick={() => setRouteDeleteConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Share Options Modal ── */}
+      {showShareOptionsModal && shareModalData && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowShareOptionsModal(false); }}
+        >
+          <div className="modal share-sheet-modal">
+            <div className="modal-header">
+              <h2 className="modal-title">Share Route</h2>
+              <button className="close-button" onClick={() => setShowShareOptionsModal(false)}>
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content">
+              <div className="share-sheet-grid">
+                <button className="share-sheet-option" onClick={shareToWhatsApp}>
+                  <WhatsAppIcon size={52} />
+                  <span className="share-sheet-label">WhatsApp</span>
+                </button>
+
+                <button className="share-sheet-option" onClick={shareToMessages}>
+                  <span className="share-sheet-icon-circle share-sheet-icon-circle--green">
+                    <MessageCircle size={24} color="#FFFFFF" />
+                  </span>
+                  <span className="share-sheet-label">Messages</span>
+                </button>
+
+                <button className="share-sheet-option" onClick={shareToFacebook}>
+                  <FacebookIcon size={52} />
+                  <span className="share-sheet-label">Facebook</span>
+                </button>
+
+                <button className="share-sheet-option" onClick={shareToInstagram}>
+                  <InstagramIcon size={52} />
+                  <span className="share-sheet-label">Instagram</span>
+                </button>
+
+                <button className="share-sheet-option" onClick={copyShareLink}>
+                  <span className="share-sheet-icon-circle share-sheet-icon-circle--gray">
+                    {shareCopied ? <Check size={22} color="#34C759" /> : <Copy size={22} color="#3C3C43" />}
+                  </span>
+                  <span className="share-sheet-label">{shareCopied ? 'Copied!' : 'Copy Link'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
