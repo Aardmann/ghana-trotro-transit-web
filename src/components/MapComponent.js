@@ -167,8 +167,13 @@ const MapComponent = React.memo(({
       syncStopImages(grouped);
     };
 
-    loadImages();
-    return () => { cancelled = true; };
+    // Debounced: `stops`/`nearbyStops` can change many times in quick
+    // succession while the user pans or zooms the map. Without this,
+    // every intermediate bounds change would fire its own stop_images
+    // query. Waiting for things to settle collapses a pan gesture into
+    // a single request instead of one per frame.
+    const debounceTimer = setTimeout(() => { loadImages(); }, 400);
+    return () => { cancelled = true; clearTimeout(debounceTimer); };
   }, [stops, nearbyStops, currentUserId, syncStopImages]);
 
 
@@ -422,6 +427,17 @@ const MapComponent = React.memo(({
     #compassSvg{transition:transform 0.15s ease-out;display:block}
     .maplibregl-ctrl-bottom-right,.maplibregl-ctrl-bottom-left,
     .maplibregl-ctrl-top-right,.maplibregl-ctrl-top-left{display:none}
+    /* ── Custom attribution (maplibre's own control is disabled above) ── */
+    .map-attribution{
+      position:absolute;right:6px;bottom:4px;z-index:60;
+      background:rgba(255,255,255,0.72);
+      padding:1px 6px;border-radius:3px;
+      font:11px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;
+      color:#333;pointer-events:auto;max-width:70vw;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .map-attribution a{color:#0078A8;text-decoration:none}
+    .map-attribution a:hover{text-decoration:underline}
     .stop-popup .maplibregl-popup-content{
       padding:14px 16px;border-radius:16px;background:#fff;
       box-shadow:0 8px 32px rgba(0,0,0,0.16),0 2px 8px rgba(0,0,0,0.08);
@@ -534,11 +550,32 @@ const MapComponent = React.memo(({
       position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);
       z-index:1000;display:flex;align-items:center;justify-content:center;
     }
-    .photo-lightbox-img{ margin-top: -200px;
-    max-width:88vw;
-    max-height:50vh;
-    border-radius:8px;
-    object-fit:contain; 
+    .photo-lightbox-img-wrap{
+      position:relative;
+      margin-top: -200px;
+      max-width:88vw;
+      max-height:50vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .photo-lightbox-img{
+      max-width:88vw;
+      max-height:50vh;
+      border-radius:8px;
+      object-fit:contain;
+      display:block;
+    }
+    .photo-lightbox-spinner{
+      position:absolute;
+      top:50%; left:50%;
+      width:36px; height:36px;
+      margin:-18px 0 0 -18px;
+      border:3px solid rgba(255,255,255,0.28);
+      border-top-color:#fff;
+      border-radius:50%;
+      animation:photo-spin 0.8s linear infinite;
+      pointer-events:none;
     }
     .photo-lightbox-caption{
       position:absolute;bottom:270px;left:0;right:0;text-align:center;color:#fff;
@@ -561,6 +598,7 @@ const MapComponent = React.memo(({
 <div id="map"></div>
 <input type="file" id="stopPhotoInput" accept="image/*" style="display:none" />
 <div id="mapToast" class="map-toast"></div>
+<div id="mapAttribution" class="map-attribution"></div>
 
 
 <div class="map-controls">
@@ -649,6 +687,17 @@ var map = new maplibregl.Map({
 // Thumbnail shows the OTHER layer (what you'll switch TO)
 document.getElementById('layerThumb').src = currentLayer === 'satellite' ? OSM_THUMB : SAT_THUMB;
 
+// ── Attribution — required by OpenFreeMap/OSM's data license and Esri's
+// terms of use. Swaps automatically with the active layer (see toggleLayer).
+function updateAttribution() {
+  var el = document.getElementById('mapAttribution');
+  if (!el) return;
+  el.innerHTML = currentLayer === 'satellite'
+    ? '\u00a9 Esri, Maxar, Earthstar Geographics'
+    : '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">\u00a9 OpenStreetMap contributors</a>';
+}
+updateAttribution();
+
 map.on('load', function() {
   mapReady = true;
 
@@ -731,6 +780,7 @@ function toggleLayer() {
     map.setStyle(SATELLITE_STYLE);
     currentLayer = 'satellite';
     document.getElementById('layerThumb').src = OSM_THUMB;
+    updateAttribution();
     // Notify parent React app of layer change
     try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'satellite' }, '*'); } catch(e) {}
     map.once('styledata', function() { mapReady = true; redrawAfterStyleChange(); });
@@ -739,6 +789,7 @@ function toggleLayer() {
     map.setStyle(NORMAL_STYLE);
     currentLayer = 'normal';
     document.getElementById('layerThumb').src = SAT_THUMB;
+    updateAttribution();
     // Notify parent React app of layer change
     try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'normal' }, '*'); } catch(e) {}
     map.once('styledata', function() {
@@ -1471,14 +1522,27 @@ function closeLightbox() {
 function openLightbox(stop) {
   var images = approvedImagesForStop(stop.id);
   if (images.length === 0) return;
-  var idx = 0;
+  var idx = 0;            // index the user has navigated to (may still be loading)
+  var displayedIdx = 0;   // index of the image actually on screen right now
+  var loadedIdx = {};     // indices whose image has finished loading at least once
+  var pendingLoader = null; // in-flight preloader Image(), so a later tap supersedes an earlier one
 
   var overlay = document.createElement('div');
   overlay.className = 'photo-lightbox-overlay';
   overlay.onclick = function(e) { if (e.target === overlay) close(); };
 
+  var imgWrap = document.createElement('div');
+  imgWrap.className = 'photo-lightbox-img-wrap';
+
   var img = document.createElement('img');
   img.className = 'photo-lightbox-img';
+
+  var spinner = document.createElement('div');
+  spinner.className = 'photo-lightbox-spinner';
+  spinner.style.display = 'none';
+
+  imgWrap.appendChild(img);
+  imgWrap.appendChild(spinner);
 
   var caption = document.createElement('div');
   caption.className = 'photo-lightbox-caption';
@@ -1488,7 +1552,7 @@ function openLightbox(stop) {
   addBtn.textContent = '+ Add photo';
   addBtn.onclick = function(e) { e.stopPropagation(); close(); triggerFileInput(stop.id); };
 
-  overlay.appendChild(img);
+  overlay.appendChild(imgWrap);
   overlay.appendChild(caption);
   overlay.appendChild(addBtn);
 
@@ -1496,29 +1560,73 @@ function openLightbox(stop) {
     var prevBtn = document.createElement('div');
     prevBtn.className = 'photo-lightbox-nav photo-lightbox-prev';
     prevBtn.innerHTML = '&#8249;';
-    prevBtn.onclick = function(e) { e.stopPropagation(); idx = (idx - 1 + images.length) % images.length; render(); };
+    prevBtn.onclick = function(e) { e.stopPropagation(); goTo((idx - 1 + images.length) % images.length); };
 
     var nextBtn = document.createElement('div');
     nextBtn.className = 'photo-lightbox-nav photo-lightbox-next';
     nextBtn.innerHTML = '&#8250;';
-    nextBtn.onclick = function(e) { e.stopPropagation(); idx = (idx + 1) % images.length; render(); };
+    nextBtn.onclick = function(e) { e.stopPropagation(); goTo((idx + 1) % images.length); };
 
     overlay.appendChild(prevBtn);
     overlay.appendChild(nextBtn);
   }
 
+  // Navigates to targetIdx. If that image already finished loading once
+  // (browser cache, or a slide the user already visited this session),
+  // swap it in immediately. Otherwise leave the currently-displayed image
+  // and caption count exactly as they are, show a spinner over it, and only
+  // commit the swap — new image + new count — once the target image has
+  // actually finished loading, so the counter never jumps ahead of what's
+  // visible on screen.
+  function goTo(targetIdx) {
+    idx = targetIdx;
+
+    if (loadedIdx[targetIdx]) {
+      pendingLoader = null;
+      spinner.style.display = 'none';
+      displayedIdx = targetIdx;
+      render();
+      return;
+    }
+
+    spinner.style.display = 'block';
+
+    var loader = new Image();
+    pendingLoader = loader;
+    loader.onload = function() {
+      if (pendingLoader !== loader) return; // a later tap already superseded this load
+      loadedIdx[targetIdx] = true;
+      pendingLoader = null;
+      spinner.style.display = 'none';
+      displayedIdx = targetIdx;
+      render();
+    };
+    loader.onerror = function() {
+      if (pendingLoader !== loader) return;
+      // Don't get stuck spinning forever on a broken image — still advance;
+      // the caption/count will match whatever the browser ends up showing.
+      loadedIdx[targetIdx] = true;
+      pendingLoader = null;
+      spinner.style.display = 'none';
+      displayedIdx = targetIdx;
+      render();
+    };
+    loader.src = images[targetIdx].url;
+  }
+
   function render() {
-    img.src = images[idx].url;
-    caption.textContent = stop.name + (images.length > 1 ? ' (' + (idx + 1) + '/' + images.length + ')' : '');
+    img.src = images[displayedIdx].url;
+    caption.textContent = stop.name + (images.length > 1 ? ' (' + (displayedIdx + 1) + '/' + images.length + ')' : '');
   }
   function close() {
+    pendingLoader = null;
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     if (activeLightboxClose === close) activeLightboxClose = null;
     try { window.parent.postMessage({ type: 'PHOTO_LIGHTBOX_CLOSE' }, '*'); } catch(e) {}
   }
   activeLightboxClose = close;
 
-  render();
+  goTo(0);
   document.body.appendChild(overlay);
   try { window.parent.postMessage({ type: 'PHOTO_LIGHTBOX_OPEN' }, '*'); } catch(e) {}
 }
@@ -1563,19 +1671,6 @@ window.addEventListener('message', function(e) {
 </html>`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, routeCoordinates, stops, primaryColor, volunteerMode]);
-  // NOTE: `userLocation` is intentionally left out of this dependency list
-  // too, for the same reason as `nearbyStops` below — embedding it only
-  // seeds the iframe's *initial* user-location dot; after that, updates are
-  // pushed in live via syncUserLocation/USER_LOCATION_UPDATE instead of
-  // rebuilding the whole map (which used to reset zoom/pan/bearing and
-  // cause a visible "flash" every time a fresh GPS fix came in).
-  // NOTE: `nearbyStops` is intentionally left out of this dependency list.
-  // Embedding it only seeds the iframe's *initial* set of nearby-stop dots;
-  // after that, new stops are pushed in live via postMessage (see the
-  // NEARBY_STOPS_ADD effect below) instead of rebuilding the whole map HTML,
-  // which used to blow away zoom/pan and look like a "refresh" every time
-  // the user panned somewhere new.
-
   const html = useMemo(() => generateHTML(), [generateHTML]);
 
   const [blobUrl, setBlobUrl] = useState(null);

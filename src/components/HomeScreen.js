@@ -94,6 +94,75 @@ const InstagramIcon = ({ size = 26 }) => (
   </svg>
 );
 
+// ── Client-side image compression ──────────────────────────────────────────
+// Stop photos come straight off phone cameras (often several MB each), and
+// there's no server-side resizing step — whatever gets uploaded here is what
+// sits in Supabase Storage and gets downloaded by every user who later views
+// that stop. Downscale + re-encode as JPEG before upload so contributors on
+// slow/expensive mobile data aren't sending full-resolution originals.
+// Falls back to the original file untouched if anything goes wrong (e.g. a
+// format the canvas can't decode), so a compression failure never blocks
+// the upload itself.
+const COMPRESS_MAX_DIMENSION = 1280; // px, longest side
+const COMPRESS_QUALITY = 0.6; // JPEG quality, 0–1
+
+function compressImageFile(file, {
+  maxDimension = COMPRESS_MAX_DIMENSION,
+  quality = COMPRESS_QUALITY,
+} = {}) {
+  return new Promise((resolve) => {
+    if (!file || !file.type?.startsWith('image/') || file.type === 'image/svg+xml') {
+      resolve(file);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(objectUrl);
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          // A tiny/already-compressed source can end up larger after
+          // re-encoding — fall back to the original in that case.
+          if (blob.size >= file.size) {
+            resolve(file);
+            return;
+          }
+          const compressedName = (file.name || 'photo').replace(/\.[a-zA-Z0-9]+$/, '') + '.jpg';
+          resolve(new File([blob], compressedName, { type: 'image/jpeg' }));
+        }, 'image/jpeg', quality);
+      } catch (err) {
+        console.error('Image compression failed, using original file:', err);
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      }
+    };
+
+    img.onerror = () => {
+      console.error('Image compression failed to load image, using original file');
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 const AuthForm = ({ onSignIn, onSignUp, onGoogleSignIn, authLoading, googleAuthLoading, onForgotPasswordOpen }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1425,45 +1494,53 @@ const GhanaTrotroTransit = () => {
   }, [user]);
 
   // Fetch stop suggestions
-  const fetchSuggestions = useCallback(async (query, type) => {
+  // Debounced per field (start vs destination get independent timers so
+  // typing in one doesn't cancel a pending lookup for the other). Only the
+  // actual network query is delayed — a cache hit still resolves instantly.
+  const suggestionTimersRef = useRef({});
+  const fetchSuggestions = useCallback((query, type) => {
+    if (suggestionTimersRef.current[type]) {
+      clearTimeout(suggestionTimersRef.current[type]);
+    }
+
     if (query.length < 2) {
       setSuggestions([]);
       return;
     }
 
-    // Device cache first — repeat lookups (retyping, or the same query on a
-    // later app open) are served without hitting the `stops` table again.
     const cached = getCachedStopSearch(query);
     if (cached) {
       setSuggestions(cached);
       return;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('stops')
-        .select('*')
-        .eq('approved', true)
-        .eq('user_location_to_create', false)
-        .ilike('name', `%${query}%`)
-        .limit(5);
+    suggestionTimersRef.current[type] = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('stops')
+          .select('*')
+          .eq('approved', true)
+          .eq('user_location_to_create', false)
+          .ilike('name', `%${query}%`)
+          .limit(5);
 
-      if (!error && data) {
-        setSuggestions(data);
-        setCachedStopSearch(query, data);
-      } else {
+        if (!error && data) {
+          setSuggestions(data);
+          setCachedStopSearch(query, data);
+        } else {
+          const filtered = SAMPLE_STOPS.filter(stop => 
+            stop.name.toLowerCase().includes(query.toLowerCase())
+          );
+          setSuggestions(filtered);
+        }
+      } catch (error) {
+        console.error('Error fetching suggestions:', error);
         const filtered = SAMPLE_STOPS.filter(stop => 
           stop.name.toLowerCase().includes(query.toLowerCase())
         );
         setSuggestions(filtered);
       }
-    } catch (error) {
-      console.error('Error fetching suggestions:', error);
-      const filtered = SAMPLE_STOPS.filter(stop => 
-        stop.name.toLowerCase().includes(query.toLowerCase())
-      );
-      setSuggestions(filtered);
-    }
+    }, 300);
   }, []);
 
   // Authentication functions
@@ -1915,13 +1992,14 @@ const GhanaTrotroTransit = () => {
 
       for (const file of updateStopImages) {
         try {
-          const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+          const compressed = await compressImageFile(file);
+          const ext = (compressed.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
           const leaf = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
           const path = `${pendingUpdateStop.id}/${leaf}.${ext}`;
 
           const { error: uploadError } = await supabase.storage
             .from('stop-images')
-            .upload(path, file, { contentType: file.type || 'image/jpeg' });
+            .upload(path, compressed, { contentType: compressed.type || 'image/jpeg' });
           if (uploadError) throw uploadError;
 
           const { data: publicData } = supabase.storage.from('stop-images').getPublicUrl(path);
@@ -1996,13 +2074,14 @@ const GhanaTrotroTransit = () => {
 
       for (const file of newStopImages) {
         try {
-          const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+          const compressed = await compressImageFile(file);
+          const ext = (compressed.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
           const leaf = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
           const path = `${newStopId}/${leaf}.${ext}`;
 
           const { error: uploadError } = await supabase.storage
             .from('stop-images')
-            .upload(path, file, { contentType: file.type || 'image/jpeg' });
+            .upload(path, compressed, { contentType: compressed.type || 'image/jpeg' });
           if (uploadError) throw uploadError;
 
           const { data: publicData } = supabase.storage.from('stop-images').getPublicUrl(path);
@@ -2507,6 +2586,12 @@ const GhanaTrotroTransit = () => {
 
   // Refresh current routes without UI flicker
   const refreshCurrentRoutes = useCallback(async () => {
+    // Guard against empty startPoint/destination: the matching filter below
+    // uses `.includes('')`, which is true for every stop name, so running
+    // it with blank search terms would silently match (and display) every
+    // route in the database instead of leaving the current selection alone.
+    if (!startPoint || !destination) return;
+
     try {
       const { data: routesData, error } = await supabase
         .from('routes')
@@ -2831,6 +2916,17 @@ const GhanaTrotroTransit = () => {
       if (!routeData) return null;
 
       const formatted = await formatRoute(routeData);
+
+      // Keep startPoint/destination in sync with the route that was just
+      // opened. Without this they stay '' (their initial value), and since
+      // refreshCurrentRoutes matches names with .includes(), an empty
+      // string matches every stop name — the next realtime update or
+      // window-focus refresh would then replace this single shared route
+      // with every route in the database in the "Available Routes" list.
+      const firstStop = formatted.stops?.[0];
+      const lastStop = formatted.stops?.[formatted.stops.length - 1];
+      if (firstStop) setStartPoint(firstStop.name);
+      if (lastStop) setDestination(lastStop.name);
 
       setRoutes([formatted]);
       setSelectedRoute(formatted);

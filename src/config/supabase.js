@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createGuardedFetch } from './requestGuard';
 
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -12,6 +13,7 @@ if (!supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: createGuardedFetch() },
   auth: {
     storage: localStorage,
     autoRefreshToken: true,
