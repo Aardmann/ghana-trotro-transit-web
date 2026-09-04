@@ -41,6 +41,8 @@
     ]
   },
   "devDependencies": {
-    "gh-pages": "^6.3.0"
+    "express": "^5.2.1",
+    "gh-pages": "^6.3.0",
+    "puppeteer": "^25.10.0"
   }
 }

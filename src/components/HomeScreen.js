@@ -40,6 +40,7 @@ import { COLORS, MAP_CONFIG, SAMPLE_STOPS } from '../utils/constants';
 import MapComponent from './MapComponent';
 import '../styles/HomeScreen.css';
 import contributorBadgeIcon from '../assets/trotro-vehicle.png';
+import SeoContent from './SeoContent';
 
 // Users with more than this many contributions get the trotro badge next to their name.
 const CONTRIBUTOR_BADGE_THRESHOLD = 5;
@@ -4208,6 +4209,8 @@ const GhanaTrotroTransit = () => {
         recenterRouteTrigger={recenterRouteTrigger}
         onPhotoLightboxChange={setIsPhotoLightboxOpen}
       />
+
+      <SeoContent />
 
       {/* App Title in Top Left */}
       <div className="app-title-top-left">

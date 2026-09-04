@@ -1,15 +1,22 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gtt-web",
-  "compatibility_date": "2026-07-11",
-  "observability": {
-    "enabled": true
-  },
-  "assets": {
-    "directory": "build",
-    "not_found_handling": "404-page"
-  },
-  "compatibility_flags": [
-    "nodejs_compat"
-  ]
- }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gtt-web",
+	"compatibility_date": "2026-07-11",
+	"observability": {
+		"enabled": true
+	},
+	"assets": {
+		"directory": "build",
+		"not_found_handling": "404-page"
+	},
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"kv_namespaces": [
+		{
+			"binding": "PRERENDER_CACHE",
+			"id": "817a1ebf20ac41ce8f11ab459f4881f8",
+			"remote": true
+		}
+	]
+}
