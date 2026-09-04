@@ -12,6 +12,9 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+  "browser": {
+		"binding": "MYBROWSER"
+	},
 	"kv_namespaces": [
 		{
 			"binding": "PRERENDER_CACHE",

@@ -657,6 +657,8 @@ var routeCoords = ${routeJSON};
 var userLoc     = ${userLocationJSON};
 var nearbyStopsData = ${nearbyStopsJSON};
 var userLocMarker = null;
+var userLocDisplayed = null; // {lat,lng} currently on screen — may lag behind userLoc mid-animation
+var userLocAnimFrame = null;
 // Populated (without a full map reload) via STOP_IMAGES_SYNC postMessage from React
 var stopImagesMap = {};
 var pendingUploadStopId = null;
@@ -1035,10 +1037,49 @@ function hexToRgba(hex, alpha) {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 }
 
+// Smoothly moves the marker from wherever it's currently displayed to a
+// fresh GPS fix, instead of snapping there instantly. A raw fix-to-fix jump
+// — even just a few meters of GPS jitter — reads as the dot "teleporting"
+// or bouncing; animating it over a couple hundred ms reads as continuous
+// movement instead.
+function animateUserLocationTo(target, durationMs) {
+  if (userLocAnimFrame) { cancelAnimationFrame(userLocAnimFrame); userLocAnimFrame = null; }
+  var start = userLocDisplayed || target;
+  var startTime = performance.now();
+  durationMs = durationMs || 350;
+
+  function step(now) {
+    var t = Math.min(1, (now - startTime) / durationMs);
+    var eased = 1 - Math.pow(1 - t, 2); // ease-out — quick start, settles gently into the fix
+    var lat = start.lat + (target.lat - start.lat) * eased;
+    var lng = start.lng + (target.lng - start.lng) * eased;
+    userLocDisplayed = { lat: lat, lng: lng };
+    if (userLocMarker) userLocMarker.setLngLat([lng, lat]);
+    if (t < 1) {
+      userLocAnimFrame = requestAnimationFrame(step);
+    } else {
+      userLocAnimFrame = null;
+    }
+  }
+  userLocAnimFrame = requestAnimationFrame(step);
+}
+
 // ── User location marker ("you are here") ──────────────────────────────────
 function drawUserLocation() {
-  if (userLocMarker) { userLocMarker.remove(); userLocMarker = null; }
-  if (!mapReady || !userLoc) return;
+  if (!mapReady || !userLoc) {
+    if (userLocAnimFrame) { cancelAnimationFrame(userLocAnimFrame); userLocAnimFrame = null; }
+    if (userLocMarker) { userLocMarker.remove(); userLocMarker = null; }
+    userLocDisplayed = null;
+    return;
+  }
+
+  if (userLocMarker) {
+    // Marker already exists — animate it to the new fix instead of tearing
+    // it down and rebuilding it. Removing/recreating on every update (the
+    // old behavior) caused a visible flash and made movement look jumpy.
+    animateUserLocationTo({ lat: userLoc.lat, lng: userLoc.lng });
+    return;
+  }
 
   var wrap = document.createElement('div');
   wrap.style.cssText = 'width:22px;height:22px;position:relative; z-index:1000;';
@@ -1071,6 +1112,7 @@ function drawUserLocation() {
 
   var popup = new maplibregl.Popup();
 
+  userLocDisplayed = { lat: userLoc.lat, lng: userLoc.lng };
   userLocMarker = new maplibregl.Marker({ element:wrap })
     .setLngLat([userLoc.lng, userLoc.lat])
     .setPopup(popup)
