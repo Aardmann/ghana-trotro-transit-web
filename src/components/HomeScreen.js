@@ -6061,7 +6061,7 @@ const GhanaTrotroTransit = () => {
                 className="cookie-consent-info-button"
                 onClick={() => setShowCookieInfoModal(true)}
               >
-                What cookies are used for
+                What cookies are used for?
               </button>
               <div className="cookie-consent-main-actions">
                 <button
