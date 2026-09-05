@@ -55,7 +55,7 @@ const GoogleIcon = ({ size = 18 }) => (
   </svg>
 );
 
-// Brand marks used on the route Share sheet — self-contained circles (bg +
+// Brand marks used on the route Share sheet - self-contained circles (bg +
 // glyph baked in) so they drop straight into a row without extra styling.
 const WhatsAppIcon = ({ size = 26 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
@@ -97,7 +97,7 @@ const InstagramIcon = ({ size = 26 }) => (
 
 // ── Client-side image compression ──────────────────────────────────────────
 // Stop photos come straight off phone cameras (often several MB each), and
-// there's no server-side resizing step — whatever gets uploaded here is what
+// there's no server-side resizing step - whatever gets uploaded here is what
 // sits in Supabase Storage and gets downloaded by every user who later views
 // that stop. Downscale + re-encode as JPEG before upload so contributors on
 // slow/expensive mobile data aren't sending full-resolution originals.
@@ -139,7 +139,7 @@ function compressImageFile(file, {
             return;
           }
           // A tiny/already-compressed source can end up larger after
-          // re-encoding — fall back to the original in that case.
+          // re-encoding - fall back to the original in that case.
           if (blob.size >= file.size) {
             resolve(file);
             return;
@@ -491,7 +491,7 @@ const AuthForm = ({ onSignIn, onSignUp, onGoogleSignIn, authLoading, googleAuthL
 //   route_compositions.composite_route_id  → FK to the parent/composite route
 //   route_compositions.sub_route_id        → FK to each constituent sub-route
 //   route_compositions.composition_order   → display order
-//   No fare_override column — fare always comes from sub_route.total_fare
+//   No fare_override column - fare always comes from sub_route.total_fare
 const fetchCompositeSegments = async (routeId) => {
   const { data: compositions, error } = await supabase
     .from('route_compositions')
@@ -531,7 +531,7 @@ const fetchCompositeSegments = async (routeId) => {
       distance:     subRoute.total_distance,
       fromName:     firstStop?.name ?? '',
       toName:       lastStop?.name  ?? '',
-      // Vehicle type used for this leg's boundary stops — shown as a tag
+      // Vehicle type used for this leg's boundary stops - shown as a tag
       // next to the stop name in the stops list.
       fromVehicleType: firstStop?.vehicle_type ?? null,
       toVehicleType:   lastStop?.vehicle_type  ?? null,
@@ -686,7 +686,7 @@ const GhanaTrotroTransit = () => {
   // ── User location (requires cookie/location consent) ────────────────
   const [userLocation, setUserLocation] = useState(null);
   // Current visible map viewport (set from MapComponent's MAP_MOVED
-  // messages) — used only to decide whether the user-location dot is
+  // messages) - used only to decide whether the user-location dot is
   // currently on screen, so the "locate me" button can hide itself when
   // it doesn't need to do anything.
   const [mapBounds, setMapBounds] = useState(null);
@@ -700,7 +700,7 @@ const GhanaTrotroTransit = () => {
   // so the banner doesn't flash on screen while the browser's own
   // permission prompt (or a slow GPS fix) is still pending.
   const [locationPromptEligible, setLocationPromptEligible] = useState(false);
-  // Session-only — once the user closes the nudge, don't show it again
+  // Session-only - once the user closes the nudge, don't show it again
   // for the rest of this visit.
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
   // True once the browser has actually denied the geolocation prompt -
@@ -711,13 +711,13 @@ const GhanaTrotroTransit = () => {
   const [isRequestingLocation, setIsRequestingLocation] = useState(false);
 
   // ── Nearby stops (faint reference dots around the user) ─────────────
-  // Fetched once per location (device-cached — see fetchNearbyStops below)
+  // Fetched once per location (device-cached - see fetchNearbyStops below)
   // rather than every time the app is opened or refreshed.
   const [nearbyStops, setNearbyStops] = useState([]);
 
   // Merges a freshly-fetched (or cached) batch into whatever nearby stops
   // are already known, deduping by id, so the visible dot set only ever
-  // grows as the user pans — it never gets replaced/reset on each fetch.
+  // grows as the user pans - it never gets replaced/reset on each fetch.
   const mergeNearbyStops = useCallback((batch) => {
     setNearbyStops((prev) => {
       const seen = new Set(prev.map((s) => s.id));
@@ -773,7 +773,7 @@ const GhanaTrotroTransit = () => {
   }, [mergeNearbyStops]);
 
   // Runs once userLocation becomes available (see requestUserLocation
-  // below) — cache-first, so a refresh won't hit the DB again unless the
+  // below) - cache-first, so a refresh won't hit the DB again unless the
   // cache expired or the user moved. This only ever fires if the user has
   // granted location access; otherwise userLocation stays null and no
   // location-based lookup happens at all.
@@ -785,7 +785,7 @@ const GhanaTrotroTransit = () => {
 
   // ── Stops for whatever area the user has panned the map to ──────────
   // Unlike the location-based fetch above, this doesn't require location
-  // permission at all — it's just based on where the user is looking on
+  // permission at all - it's just based on where the user is looking on
   // the map. Reuses the same cache-first fetchNearbyStops + device cache,
   // so revisiting an area already seen (this session or a past one)
   // doesn't re-hit the DB. A simple distance check keeps small map
@@ -804,9 +804,9 @@ const GhanaTrotroTransit = () => {
   }, [fetchNearbyStops]);
 
   // True only once we both have a location fix and know the current
-  // viewport — used to decide whether the "locate me" button should show.
+  // viewport - used to decide whether the "locate me" button should show.
   const isUserLocationVisible = useMemo(() => {
-    if (!userLocation || !mapBounds) return true; // unknown yet — don't show the button
+    if (!userLocation || !mapBounds) return true; // unknown yet - don't show the button
     return (
       userLocation.lat <= mapBounds.north &&
       userLocation.lat >= mapBounds.south &&
@@ -816,13 +816,13 @@ const GhanaTrotroTransit = () => {
   }, [userLocation, mapBounds]);
 
   // True only when every stop on the currently selected route already sits
-  // inside the visible map viewport — used to decide whether the "recenter
+  // inside the visible map viewport - used to decide whether the "recenter
   // to route" button should show. Mirrors isUserLocationVisible above, but
   // checks the whole stop set rather than a single point, since a route can
   // be partially panned off-screen even if its first stop is still visible.
   const isRouteVisible = useMemo(() => {
     const routeStops = selectedRoute?.stops;
-    if (!routeStops || routeStops.length < 2 || !mapBounds) return true; // unknown/none yet — don't show the button
+    if (!routeStops || routeStops.length < 2 || !mapBounds) return true; // unknown/none yet - don't show the button
     return routeStops.every(
       (s) =>
         s.lat <= mapBounds.north &&
@@ -920,7 +920,7 @@ const GhanaTrotroTransit = () => {
   }, [cookiesAccepted, requestUserLocation]);
 
   // Give the browser's own permission prompt (or a slow GPS fix) a few
-  // seconds before considering the nudge banner eligible to show — avoids
+  // seconds before considering the nudge banner eligible to show - avoids
   // a flash of "enable location" the instant the page loads.
   useEffect(() => {
     if (!cookiesAccepted) return;
@@ -929,8 +929,8 @@ const GhanaTrotroTransit = () => {
   }, [cookiesAccepted]);
 
   // Shown whenever the user's location marker still isn't on the map after
-  // that grace period — i.e. permission was never granted, was denied, or
-  // geolocation isn't available — encouraging them to turn it on.
+  // that grace period - i.e. permission was never granted, was denied, or
+  // geolocation isn't available - encouraging them to turn it on.
   const showLocationPermissionBanner =
     cookiesAccepted && locationPromptEligible && !userLocation && !locationBannerDismissed;
 
@@ -940,7 +940,7 @@ const GhanaTrotroTransit = () => {
 
   // The very first time a location fix comes in during this session (and
   // no route is on screen yet, so there's nothing else the view needs to
-  // show), smoothly fly the map to it — this is what puts the user's blue
+  // show), smoothly fly the map to it - this is what puts the user's blue
   // dot in view on a fresh app open instead of leaving the map sitting on
   // the static default center.
   const hasAutoCenteredOnUserRef = useRef(false);
@@ -952,7 +952,7 @@ const GhanaTrotroTransit = () => {
   }, [userLocation, selectedRoute]);
 
   // True while a stop's full-size photo lightbox is open inside the map
-  // iframe — used to hide the app's own floating buttons (hamburger,
+  // iframe - used to hide the app's own floating buttons (hamburger,
   // search, locate-me, etc.) so they don't float on top of the lightbox.
   const [isPhotoLightboxOpen, setIsPhotoLightboxOpen] = useState(false);
 
@@ -981,9 +981,9 @@ const GhanaTrotroTransit = () => {
   const [exploreError, setExploreError] = useState(null);
   const exploreFetchedRef = useRef(false);
 
-  // Profile modal — Account sub-view state
+  // Profile modal - Account sub-view state
   const [profileView, setProfileView] = useState('menu'); // 'menu' | 'account'
-  // Guests see the normal profile menu first — this only flips to true once
+  // Guests see the normal profile menu first - this only flips to true once
   // they tap Account, Search History, or the header Sign In button.
   const [showGuestSignIn, setShowGuestSignIn] = useState(false);
   const [editFirstName, setEditFirstName] = useState('');
@@ -1030,7 +1030,7 @@ const GhanaTrotroTransit = () => {
   const [createdRoutesHistory, setCreatedRoutesHistory] = useState([]);
   const [searchHistory, setSearchHistory] = useState(() => getSearchHistoryFromCookie());
 
-  // Delete-created-route confirmation — holds { routeId, title, message,
+  // Delete-created-route confirmation - holds { routeId, title, message,
   // confirmText } while the confirm modal is open, built by
   // requestDeleteCreatedRoute() and acted on by deleteCreatedRoute().
   const [routeDeleteConfirm, setRouteDeleteConfirm] = useState(null);
@@ -1038,7 +1038,7 @@ const GhanaTrotroTransit = () => {
 
   // Download app modal state
   const [showDownloadAppModal, setShowDownloadAppModal] = useState(false);
-  // Which flow triggered the download-app modal — lets the modal show the
+  // Which flow triggered the download-app modal - lets the modal show the
   // "Create Route is mobile-only" pitch when opened from the plus button,
   // vs a plain "get the app" pitch when opened from the Get the App button.
   const [downloadAppModalReason, setDownloadAppModalReason] = useState('createRoute');
@@ -1058,7 +1058,7 @@ const GhanaTrotroTransit = () => {
   // true = general report (from profile, no route attached); false = route report
   const [isGeneralReport, setIsGeneralReport] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
-  // Share sheet — replaces navigator.share with a fixed list of apps so the
+  // Share sheet - replaces navigator.share with a fixed list of apps so the
   // options are consistent everywhere instead of whatever the OS exposes.
   const [showShareOptionsModal, setShowShareOptionsModal] = useState(false);
   const [shareModalData, setShareModalData] = useState(null); // { title, text, url } | null
@@ -1113,7 +1113,7 @@ const GhanaTrotroTransit = () => {
   const [isSwipeActive, setIsSwipeActive] = useState(false);
   const bottomSheetContentRef = useRef(null);
   const touchStartYRef = useRef(null);
-  const swipeAxisLockRef = useRef(null); // 'x' | 'y' | null — decided once per gesture
+  const swipeAxisLockRef = useRef(null); // 'x' | 'y' | null - decided once per gesture
 
   // ── Vertical drag / snap state ──────────────────────────────────────────────
   const SNAP_HEIGHTS = [32, 58, 88]; // vh: peek, half, full
@@ -1133,7 +1133,7 @@ const GhanaTrotroTransit = () => {
     const viewportH = window.innerHeight;
     const estimatedPx = 160 + 80 + stopCount * 72 + 40;
     const estimatedVh = Math.round((estimatedPx / viewportH) * 100);
-    // Clamp: min 42 vh, max 88 vh — this is the new "full" snap
+    // Clamp: min 42 vh, max 88 vh - this is the new "full" snap
     const fullSnap = Math.min(Math.max(estimatedVh, 42), 88);
     // Rebuild snap points with the computed full height
     const newSnaps = [32, Math.round((32 + fullSnap) / 2), fullSnap];
@@ -1160,7 +1160,7 @@ const GhanaTrotroTransit = () => {
     if (memoizedRouteCoordinates.length > 0) {
       return memoizedRouteCoordinates[0];
     }
-    // No route selected — use the static default. We used to fall back to
+    // No route selected - use the static default. We used to fall back to
     // userLocation here, but that made `center` change (and rebuild the
     // whole iframe) every time a fresh GPS fix came in. Centering on the
     // user is instead handled by a smooth flyTo once the map has loaded
@@ -1292,7 +1292,7 @@ const GhanaTrotroTransit = () => {
   // Fetch user history
   const fetchUserHistory = useCallback(async (userId) => {
     // Show the device-cached search history immediately (no DB wait), then
-    // quietly refresh from Supabase below and update the cache to match —
+    // quietly refresh from Supabase below and update the cache to match -
     // keeps things instant on reopen while still staying in sync.
     const cachedSearch = getCachedUserSearchHistory(userId);
     if (cachedSearch) setSearchHistory(cachedSearch);
@@ -1313,7 +1313,7 @@ const GhanaTrotroTransit = () => {
     }
   }, []);
 
-  // Save search history — Supabase for signed-in users, an on-device
+  // Save search history - Supabase for signed-in users, an on-device
   // cookie for guests so they still get a "recent searches" list.
   const saveSearchHistory = useCallback(async (start, dest) => {
     if (!user) {
@@ -1404,8 +1404,8 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Works out the right confirmation copy for deleting a created route —
-  // pending submissions get an extra warning about losing the paid fee —
+  // Works out the right confirmation copy for deleting a created route -
+  // pending submissions get an extra warning about losing the paid fee -
   // then opens the confirm modal for deleteCreatedRoute() to act on.
   // NOTE: `user_created_routes` rows don't carry a `status` column per the
   // current schema, so `route.status` is undefined today and this will
@@ -1497,7 +1497,7 @@ const GhanaTrotroTransit = () => {
   // Fetch stop suggestions
   // Debounced per field (start vs destination get independent timers so
   // typing in one doesn't cancel a pending lookup for the other). Only the
-  // actual network query is delayed — a cache hit still resolves instantly.
+  // actual network query is delayed - a cache hit still resolves instantly.
   const suggestionTimersRef = useRef({});
   const fetchSuggestions = useCallback((query, type) => {
     if (suggestionTimersRef.current[type]) {
@@ -1852,7 +1852,7 @@ const GhanaTrotroTransit = () => {
     setShowAddStopModal(true);
   }, [volunteerMode, pickingUpdateLocation]);
 
-  // Called by MapComponent when a nearby-stop dot is double-tapped —
+  // Called by MapComponent when a nearby-stop dot is double-tapped -
   // pre-fills the "start" field with that stop's name and opens the
   // search sheet so the user can pick a destination.
   const handleNearbyStopSelect = useCallback((name) => {
@@ -1876,7 +1876,7 @@ const GhanaTrotroTransit = () => {
   }, []);
 
   // Searches approved stops by name so the user can find the one they want
-  // to correct — kept separate from the main start/destination `suggestions`
+  // to correct - kept separate from the main start/destination `suggestions`
   // state so the two search UIs never clobber each other.
   const fetchUpdateStopResults = useCallback(async (query) => {
     if (query.trim().length < 2) {
@@ -1950,7 +1950,7 @@ const GhanaTrotroTransit = () => {
   }, []);
 
   // Submits a correction for an existing stop into the `contributions` table
-  // (type: 'update') for a moderator to review — the stop itself isn't
+  // (type: 'update') for a moderator to review - the stop itself isn't
   // changed until it's approved. Any attached photos still go through the
   // normal stop_images pending-approval flow.
   const handleSubmitStopUpdate = useCallback(async () => {
@@ -2054,7 +2054,7 @@ const GhanaTrotroTransit = () => {
     setNewStopImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Submits a volunteer-added stop (and any photos) — unapproved until a
+  // Submits a volunteer-added stop (and any photos) - unapproved until a
   // moderator reviews it, exactly like the earner-submitted stops flow.
   const handleSubmitNewStop = useCallback(async () => {
     if (!pendingStopCoords || !newStopName.trim()) return;
@@ -2155,7 +2155,7 @@ const GhanaTrotroTransit = () => {
         console.error(
           'Paystack public key is missing or invalid:',
           PAYSTACK_PUBLIC_KEY,
-          '— check your REACT_APP_PAYSTACK_PUBLIC_KEY (or VITE_ equivalent) env var, ' +
+          '- check your REACT_APP_PAYSTACK_PUBLIC_KEY (or VITE_ equivalent) env var, ' +
           'that the dev server was restarted after setting it, and that it is set in your ' +
           'deployment environment for production builds.'
         );
@@ -2212,7 +2212,7 @@ const GhanaTrotroTransit = () => {
   // Shares a route via the Web Share API (falling back to copying a link).
   // Pass no argument to share the currently open selectedRoute (the bottom
   // sheet's Share button), or pass a user_created_routes record (from the
-  // Created Routes list) to share that instead — the two have different
+  // Created Routes list) to share that instead - the two have different
   // shapes, detected below. Builds the share text/link, then opens the
   // in-app share sheet (see showShareOptionsModal) rather than the OS one.
   const handleShareRoute = useCallback((routeOverride) => {
@@ -2233,7 +2233,7 @@ const GhanaTrotroTransit = () => {
       startName = route.start_point;
       destName = route.destination;
       // `id` on this record is the user_created_routes row, not a row in
-      // the public `routes` table the deep link resolves against — use
+      // the public `routes` table the deep link resolves against - use
       // main_route_id instead, which is only set once the route has been
       // approved and published (falls back to from/to below otherwise).
       shareId = route.main_route_id;
@@ -2248,7 +2248,7 @@ const GhanaTrotroTransit = () => {
     }
 
     const shareText = `${routeName} • ${stopCount} stops • GH₵ ${route.total_fare}`;
-    // "id" pins the link to this exact route (precise — no ambiguity if
+    // "id" pins the link to this exact route (precise - no ambiguity if
     // other routes share the same start/end stop names). "from"/"to" ride
     // along as a fallback so the link still works via a normal search if
     // that specific route is ever removed. See the deep-link useEffect.
@@ -2277,7 +2277,7 @@ const GhanaTrotroTransit = () => {
     if (!shareModalData) return;
     const body = encodeURIComponent(`${shareModalData.text}\n${shareModalData.url}`);
     // iOS Messages expects "sms:&body=" while Android (and most others)
-    // expect "sms:?body=" — the leading separator is the only difference.
+    // expect "sms:?body=" - the leading separator is the only difference.
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
     window.location.href = isIOS ? `sms:&body=${body}` : `sms:?body=${body}`;
     setShowShareOptionsModal(false);
@@ -2285,7 +2285,7 @@ const GhanaTrotroTransit = () => {
 
   const shareToFacebook = useCallback(() => {
     if (!shareModalData) return;
-    // Facebook's sharer only reliably honors the "u" (link) param — "quote"
+    // Facebook's sharer only reliably honors the "u" (link) param - "quote"
     // is included as a best-effort prefill but Facebook may ignore it.
     const params = new URLSearchParams({ u: shareModalData.url, quote: shareModalData.text });
     window.open(`https://www.facebook.com/sharer/sharer.php?${params.toString()}`, '_blank', 'noopener,noreferrer');
@@ -2295,12 +2295,12 @@ const GhanaTrotroTransit = () => {
   const shareToInstagram = useCallback(async () => {
     if (!shareModalData) return;
     // Instagram has no web intent for prefilling a link share, so the most
-    // reliable path is to copy it and hand off to the app — the user pastes
+    // reliable path is to copy it and hand off to the app - the user pastes
     // it into a DM, Story, or bio from there.
     try {
       await navigator.clipboard.writeText(`${shareModalData.text}\n${shareModalData.url}`);
     } catch (err) {
-      // ignore — still try to open Instagram below
+      // ignore - still try to open Instagram below
     }
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (isMobile) {
@@ -2311,7 +2311,7 @@ const GhanaTrotroTransit = () => {
     } else {
       window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
     }
-    alert('Link copied — paste it into Instagram.');
+    alert('Link copied - paste it into Instagram.');
     setShowShareOptionsModal(false);
   }, [shareModalData]);
 
@@ -2665,7 +2665,7 @@ const GhanaTrotroTransit = () => {
   }, [startPoint, destination, selectedRoute]);
 
   // Log a search that returned no matching routes, so we can see demand
-  // for routes that don't exist in the database yet. Best-effort — a
+  // for routes that don't exist in the database yet. Best-effort - a
   // failure here should never block the "route not found" UX.
   const logUnmatchedSearch = useCallback(async (start, dest) => {
     try {
@@ -2856,13 +2856,13 @@ const GhanaTrotroTransit = () => {
     fetchExploreRoutes(true);
   }, [fetchExploreRoutes]);
 
-  // Popular Routes — there's no live popularity metric in the schema yet,
+  // Popular Routes - there's no live popularity metric in the schema yet,
   // so this surfaces a stable, representative slice (cheapest-fare-first,
   // the same ordering already used across the app) instead of a made-up
   // ranking.
   const popularRoutes = useMemo(() => exploreRoutes.slice(0, 8), [exploreRoutes]);
 
-  // Routes Around You — any fetched route with at least one stop inside
+  // Routes Around You - any fetched route with at least one stop inside
   // the same nearby-radius already used for the map's nearby-stop dots,
   // nearest-stop-first.
   const routesAroundYou = useMemo(() => {
@@ -2892,7 +2892,7 @@ const GhanaTrotroTransit = () => {
   }, [nearbyStops, userLocation]);
 
   // Fetches a single route by its id and opens it directly in the bottom
-  // sheet — used by the id-based deep link (see handleShareRoute / the
+  // sheet - used by the id-based deep link (see handleShareRoute / the
   // deep-link useEffect) so a shared link opens the exact route that was
   // shared, not just any route matching the same start/end stop names.
   const fetchRouteById = useCallback(async (routeId) => {
@@ -2921,7 +2921,7 @@ const GhanaTrotroTransit = () => {
       // Keep startPoint/destination in sync with the route that was just
       // opened. Without this they stay '' (their initial value), and since
       // refreshCurrentRoutes matches names with .includes(), an empty
-      // string matches every stop name — the next realtime update or
+      // string matches every stop name - the next realtime update or
       // window-focus refresh would then replace this single shared route
       // with every route in the database in the "Available Routes" list.
       const firstStop = formatted.stops?.[0];
@@ -2999,7 +2999,7 @@ const GhanaTrotroTransit = () => {
     }
   }, [selectedRoute]);
 
-  // Opens the currently-found route in Google Maps as a directions link —
+  // Opens the currently-found route in Google Maps as a directions link -
   // first/last stop become origin/destination, everything in between is
   // passed as waypoints so the same stop sequence carries over.
   const openRouteInGoogleMaps = useCallback(() => {
@@ -3042,7 +3042,7 @@ const GhanaTrotroTransit = () => {
     const distance = clientX - touchStart;
     const distanceY = touchStartYRef.current !== null ? clientY - touchStartYRef.current : 0;
 
-    // Decide the gesture's axis once, early on, and stick with it — this is
+    // Decide the gesture's axis once, early on, and stick with it - this is
     // what stops a vertical scroll from ever nudging the sheet sideways.
     if (swipeAxisLockRef.current === null) {
       if (Math.abs(distance) < 8 && Math.abs(distanceY) < 8) return; // not enough movement yet
@@ -3050,7 +3050,7 @@ const GhanaTrotroTransit = () => {
       if (swipeAxisLockRef.current === 'x') setIsSwipeActive(true);
     }
 
-    if (swipeAxisLockRef.current !== 'x') return; // vertical gesture — leave the sheet alone
+    if (swipeAxisLockRef.current !== 'x') return; // vertical gesture - leave the sheet alone
 
     // Limit the drag to -100% to 100%
     const clampedDistance = Math.max(-window.innerWidth, Math.min(window.innerWidth, distance));
@@ -3145,13 +3145,13 @@ const GhanaTrotroTransit = () => {
       const h = sheetDragRef.current.currentH;
 
       if (h <= 20) {
-        // Dragged down to (or past) the dismiss threshold — close the sheet
+        // Dragged down to (or past) the dismiss threshold - close the sheet
         closeBottomSheet();
         setSheetIsDragging(false);
         return;
       }
 
-      // Otherwise: free snap — the sheet just stays wherever the user left it
+      // Otherwise: free snap - the sheet just stays wherever the user left it
       setSheetDragHeight(h);
       setSheetIsDragging(false);
     };
@@ -4217,7 +4217,7 @@ const GhanaTrotroTransit = () => {
         <h4>Ghana Trotro Transit</h4>
       </div>
 
-      {/* Location Permission Nudge — shown when the user's location marker
+      {/* Location Permission Nudge - shown when the user's location marker
           still isn't on the map (never granted, denied, or unavailable),
           encouraging them to turn it on for a better experience. */}
       {showLocationPermissionBanner && !isPhotoLightboxOpen && (
@@ -4245,7 +4245,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
-      {/* Top Right Buttons — hidden while a stop's photo lightbox is open,
+      {/* Top Right Buttons - hidden while a stop's photo lightbox is open,
           so they don't float on top of it. The lightbox's own "+ Add photo"
           button lives inside the map iframe and is unaffected by this. */}
       {!isPhotoLightboxOpen && (
@@ -4257,7 +4257,7 @@ const GhanaTrotroTransit = () => {
             <User size={24} color="#FFFFFF" />
           </button>
 
-          {/* Explore — opens the slide-in drawer with Popular Routes, Routes
+          {/* Explore - opens the slide-in drawer with Popular Routes, Routes
               Around You, and Locations Nearby. */}
           <button
             className="hamburger-button"
@@ -4274,7 +4274,7 @@ const GhanaTrotroTransit = () => {
             <Plus size={20} color="#FFFFFF" />
           </button>
 
-          {/* Get the App — sits right below the plus button, white background
+          {/* Get the App - sits right below the plus button, white background
               so it stands out from the solid purple buttons around it. */}
           <button
             className="get-app-button"
@@ -4286,7 +4286,7 @@ const GhanaTrotroTransit = () => {
 
           {/* Stacked bottom-right action buttons. These sit in a single flex
               column so that whichever ones are conditionally hidden (Google
-              Maps, Locate Me, Recenter Route) never leave a gap behind them —
+              Maps, Locate Me, Recenter Route) never leave a gap behind them -
               the remaining buttons simply close the space. Rendered in
               bottom-to-top DOM order since the container is column-reverse. */}
           <div className="map-action-stack">
@@ -4295,7 +4295,7 @@ const GhanaTrotroTransit = () => {
               <Info size={20} color="#FFFFFF" />
             </button>
 
-            {/* Locate Me — only shown when we have a location fix AND that dot
+            {/* Locate Me - only shown when we have a location fix AND that dot
                 isn't currently visible on screen; tapping it pans/zooms the map
                 back to it rather than re-requesting permission. */}
             {userLocation && !isUserLocationVisible && (
@@ -4308,7 +4308,7 @@ const GhanaTrotroTransit = () => {
               </button>
             )}
 
-            {/* Open in Google Maps — only once a route has actually been found;
+            {/* Open in Google Maps - only once a route has actually been found;
                 opens the same stop sequence as turn-by-turn directions. */}
             {selectedRoute && (
               <button
@@ -4322,7 +4322,7 @@ const GhanaTrotroTransit = () => {
               </button>
             )}
 
-            {/* Recenter Route — only shown once a route is selected AND some
+            {/* Recenter Route - only shown once a route is selected AND some
                 part of it has been panned off-screen; tapping it flies the map
                 back to fit the whole route, same as the initial auto-fit. */}
             {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
@@ -4402,7 +4402,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
 
-      {/* ── Explore Drawer — slides in from the right ─────────────────────
+      {/* ── Explore Drawer - slides in from the right ─────────────────────
           Tabs for Popular Routes, Routes Around You, and Locations
           Nearby. Data is fetched lazily the first time the drawer opens. */}
       {showExploreDrawer && (
@@ -4765,7 +4765,7 @@ const GhanaTrotroTransit = () => {
                         onClick={handleOpenContributeChoice}
                       >
                         <span className="ios-row-icon ios-row-icon--teal">
-                          <Users size={16} color="#FFFFFF" />
+                          <Plus size={16} color="#FFFFFF" />
                         </span>
                         <span className="ios-row-text">Contribute</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -6054,14 +6054,14 @@ const GhanaTrotroTransit = () => {
         <div className="cookie-consent-overlay">
           <div className="cookie-consent-banner">
             <p className="cookie-consent-text">
-              We use cookies and your device location to keep Ghana Trotro Transit working smoothly — including saving your search history, showing your position on the map, and improving route suggestions near you. You need to agree to continue using the app.
+              We use cookies and your device location to keep Ghana Trotro Transit working smoothly - including saving your search history, showing your position on the map, and improving route suggestions near you. You need to agree to continue using the app.
             </p>
             <div className="cookie-consent-actions">
               <button
                 className="cookie-consent-info-button"
                 onClick={() => setShowCookieInfoModal(true)}
               >
-                What cookies are used for?
+                What cookies are used for.
               </button>
               <div className="cookie-consent-main-actions">
                 <button

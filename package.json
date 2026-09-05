@@ -41,8 +41,12 @@
     ]
   },
   "devDependencies": {
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "gh-pages": "^6.3.0",
     "puppeteer": "^25.10.0"
+  },
+  "overrides": {
+    "typescript": "5.1.6"
   }
 }
