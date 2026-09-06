@@ -2258,8 +2258,8 @@ const GhanaTrotroTransit = () => {
     if (destName) params.set('to', destName);
 
     const shareUrl = params.toString()
-      ? `https://gtt-web.nxnx.tech/?${params.toString()}`
-      : `https://gtt-web.nxnx.tech/`;
+      ? `https://maps.nxnx.tech/?${params.toString()}`
+      : `https://maps.nxnx.tech/`;
 
     setShareModalData({ title: routeName, text: shareText, url: shareUrl });
     setShowShareOptionsModal(true);
