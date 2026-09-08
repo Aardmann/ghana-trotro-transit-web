@@ -1798,12 +1798,50 @@ const GhanaTrotroTransit = () => {
   }, [user, editFirstName, editLastName]);
 
   const confirmDeleteAccount = useCallback(async () => {
+    if (!user) return;
     setShowDeleteAccountConfirm(false);
     setDeleteAccountLoading(true);
     try {
-      const { error } = await supabase.functions.invoke('delete-user');
-      if (error) throw error;
+      // Get the current session JWT - the Edge Function verifies this
+      // to confirm the caller's identity before deleting anything.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        alert('Error: Your session has expired, please sign in again.');
+        return;
+      }
 
+      // Clear local caches first (works even if the network call below
+      // fails, so nothing account-tied lingers on this device).
+      clearSearchHistoryCookie();
+      clearCachedExploreRoutes();
+      try { localStorage.removeItem('gtt_showRecentSearches'); } catch {}
+
+      const response = await fetch(
+        `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/delete-user`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY,
+          },
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('Edge Function error:', result);
+        await supabase.auth.signOut();
+        throw new Error(result?.error || 'Failed to delete account, please try again.');
+      }
+
+      // Auth user is now fully gone server-side - clear the local session too.
+      await supabase.auth.signOut();
+
+      // Reset all local state
+      stopRealtimeSubscriptions();
       setUser(null);
       setUserProfile(null);
       setShowProfileModal(false);
@@ -1813,14 +1851,14 @@ const GhanaTrotroTransit = () => {
       setSuggestions([]);
       setShowBottomSheet(false);
 
-      stopRealtimeSubscriptions();
-
-      setDeleteAccountLoading(false);
+      alert('Account deleted: your account and all associated data have been deleted.');
     } catch (error) {
+      console.error('Error deleting account:', error);
+      alert('Error: Failed to delete account, please try again.');
+    } finally {
       setDeleteAccountLoading(false);
-      alert('Error deleting account: ' + error.message);
     }
-  }, []);
+  }, [user, stopRealtimeSubscriptions]);
 
   const handlePasswordChange = useCallback(async () => {
     if (!user) return;
