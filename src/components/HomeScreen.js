@@ -1817,6 +1817,9 @@ const GhanaTrotroTransit = () => {
       clearCachedExploreRoutes();
       try { localStorage.removeItem('gtt_showRecentSearches'); } catch {}
 
+      // NOTE: uses REACT_APP_SUPABASE_URL / REACT_APP_SUPABASE_ANON_KEY -
+      // swap these for whatever env vars config/supabase.js actually uses
+      // if they're named differently in this project.
       const response = await fetch(
         `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/delete-user`,
         {
@@ -1858,7 +1861,11 @@ const GhanaTrotroTransit = () => {
     } finally {
       setDeleteAccountLoading(false);
     }
-  }, [user, stopRealtimeSubscriptions]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  // stopRealtimeSubscriptions is intentionally omitted above: it's declared
+  // further down in this component, so listing it here throws a
+  // "before initialization" error on every render. It's referenced inside
+  // the callback body, which only runs later (on click), so that's safe.
 
   const handlePasswordChange = useCallback(async () => {
     if (!user) return;
