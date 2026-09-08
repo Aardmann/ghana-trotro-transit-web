@@ -986,6 +986,10 @@ const GhanaTrotroTransit = () => {
   // Guests see the normal profile menu first - this only flips to true once
   // they tap Account, Search History, or the header Sign In button.
   const [showGuestSignIn, setShowGuestSignIn] = useState(false);
+  // Mobile-only nudge: an animated chevron shown over the auth form when it's
+  // taller than its scroll area, so the "Continue with Google" button below
+  // the fold isn't missed. Hidden once the user has scrolled past the top.
+  const [showAuthScrollHint, setShowAuthScrollHint] = useState(false);
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [nameUpdateLoading, setNameUpdateLoading] = useState(false);
@@ -1719,6 +1723,46 @@ const GhanaTrotroTransit = () => {
       setShowGuestSignIn(false);
     }
   }, [showProfileModal]);
+
+  // Show the "scroll for Google sign-in" hint only while the auth form is
+  // visible, taller than its scroll container, and still scrolled near the
+  // top. Re-checked on scroll (to dismiss it) and via ResizeObserver (since
+  // switching Sign In/Sign Up, or expanding the forgot-password panel,
+  // changes the form's height without changing this effect's own deps).
+  useEffect(() => {
+    if (!(showProfileModal && !user && showGuestSignIn && !pendingGoogleUser)) {
+      setShowAuthScrollHint(false);
+      return;
+    }
+
+    const el = profileModalContentRef.current;
+    if (!el) return;
+
+    const checkScrollHint = () => {
+      const isScrollable = el.scrollHeight - el.clientHeight > 16;
+      const nearTop = el.scrollTop < 16;
+      setShowAuthScrollHint(isScrollable && nearTop);
+    };
+
+    checkScrollHint();
+
+    el.addEventListener('scroll', checkScrollHint, { passive: true });
+    const resizeObserver = new ResizeObserver(checkScrollHint);
+    resizeObserver.observe(el);
+
+    return () => {
+      el.removeEventListener('scroll', checkScrollHint);
+      resizeObserver.disconnect();
+    };
+  }, [showProfileModal, user, showGuestSignIn, pendingGoogleUser]);
+
+  // Clicking/tapping the hint scrolls the auth form down toward the Google
+  // button instead of requiring a manual swipe.
+  const handleAuthScrollHintClick = useCallback(() => {
+    const el = profileModalContentRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, []);
 
   const handleOpenAccountView = useCallback(() => {
     setEditFirstName(userProfile?.first_name || '');
@@ -4631,22 +4675,34 @@ const GhanaTrotroTransit = () => {
                 </button>
               </div>
             ) : !user && showGuestSignIn ? (
-              <div className="modal-content ios-profile-content" ref={profileModalContentRef}>
-                <AuthForm
-                  onSignIn={handleSignIn}
-                  onSignUp={handleSignUp}
-                  onGoogleSignIn={handleGoogleSignIn}
-                  authLoading={authLoading}
-                  googleAuthLoading={googleAuthLoading}
-                  onForgotPasswordOpen={() => {
-                    // Wait a tick for the panel to actually expand so
-                    // scrollHeight reflects the new, taller content.
-                    requestAnimationFrame(() => {
-                      const el = profileModalContentRef.current;
-                      if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-                    });
-                  }}
-                />
+              <div className="ios-profile-scroll-wrap">
+                <div className="modal-content ios-profile-content" ref={profileModalContentRef}>
+                  <AuthForm
+                    onSignIn={handleSignIn}
+                    onSignUp={handleSignUp}
+                    onGoogleSignIn={handleGoogleSignIn}
+                    authLoading={authLoading}
+                    googleAuthLoading={googleAuthLoading}
+                    onForgotPasswordOpen={() => {
+                      // Wait a tick for the panel to actually expand so
+                      // scrollHeight reflects the new, taller content.
+                      requestAnimationFrame(() => {
+                        const el = profileModalContentRef.current;
+                        if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                      });
+                    }}
+                  />
+                </div>
+                {showAuthScrollHint && (
+                  <button
+                    type="button"
+                    className="ios-auth-scroll-hint"
+                    onClick={handleAuthScrollHintClick}
+                    aria-label="Scroll down for more sign in options"
+                  >
+                    <ChevronDown size={18} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             ) : (
               <div className="modal-content ios-profile-content">

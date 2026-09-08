@@ -959,6 +959,57 @@ body {
   padding: 4px 16px 0;
 }
 
+/* Wrapper that lets the scroll-down hint float over the scrollable auth
+   form below, instead of scrolling away with its content. */
+.ios-profile-scroll-wrap {
+  position: relative;
+}
+
+/* Animated "scroll for more" chevron over the mobile sign in/up form,
+   nudging users toward the Continue with Google button below the fold.
+   Desktop has enough vertical room, so this only shows on mobile. */
+.ios-auth-scroll-hint {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .ios-auth-scroll-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    left: 50%;
+    bottom: 6px;
+    transform: translateX(-50%);
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--primary-color);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+    z-index: 5;
+    pointer-events: auto;
+    animation: ios-auth-scroll-hint-bounce 1.4s ease-in-out infinite;
+  }
+
+  .ios-auth-scroll-hint:active {
+    transform: translateX(-50%) scale(0.92);
+  }
+}
+
+@keyframes ios-auth-scroll-hint-bounce {
+  0%, 100% {
+    transform: translate(-50%, 0);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translate(-50%, 6px);
+    opacity: 1;
+  }
+}
+
 .ios-user-info {
   display: flex;
   flex-direction: column;
