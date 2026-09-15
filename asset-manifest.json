@@ -1,12 +1,12 @@
 {
   "files": {
-    "main.css": "/static/css/main.9ae536b1.css",
-    "main.js": "/static/js/main.79a69e21.js",
+    "main.css": "/static/css/main.efb89863.css",
+    "main.js": "/static/js/main.90cbfb20.js",
     "static/media/trotro-vehicle.png": "/static/media/trotro-vehicle.314ae0dbc535aea72ccb.png",
     "index.html": "/index.html"
   },
   "entrypoints": [
-    "static/css/main.9ae536b1.css",
-    "static/js/main.79a69e21.js"
+    "static/css/main.efb89863.css",
+    "static/js/main.90cbfb20.js"
   ]
 }
