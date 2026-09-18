@@ -25,7 +25,12 @@ const MapComponent = React.memo(({
   onMapTap,
   recenterUserTrigger = 0,
   recenterRouteTrigger = 0,
+  resetBearingTrigger = 0,
+  toggleLayerTrigger = 0,
+  toggle3DTrigger = 0,
+  onBearingChange,
   onPhotoLightboxChange,
+  highlightedStop = null,
 }) => {
   const iframeRef = useRef(null);
   const mapReadyRef = useRef(false);
@@ -88,6 +93,27 @@ const MapComponent = React.memo(({
     if (!iframeRef.current?.contentWindow) return;
     try {
       iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_ROUTE' }, '*');
+    } catch (e) {}
+  }, []);
+
+  // Flies the map to a single searched/selected stop (destination bar
+  // search, a suggestion, or a "Stops Near You" card) and drops a
+  // highlight pin on it - distinct from the route's own start/end/transfer
+  // markers (drawStops) and the nearby black dots. Re-sent on MAP_READY
+  // below (same as syncUserLocation) rather than a one-shot pending flag,
+  // since highlightedStop is persistent state ("what's currently
+  // highlighted"), not a one-off tap trigger.
+  const flyToStop = useCallback((stop) => {
+    if (!iframeRef.current?.contentWindow || !stop) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_STOP', stop }, '*');
+    } catch (e) {}
+  }, []);
+
+  const clearHighlightedStop = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'CLEAR_HIGHLIGHT_STOP' }, '*');
     } catch (e) {}
   }, []);
 
@@ -292,6 +318,9 @@ const MapComponent = React.memo(({
       if (e.data?.type === 'MAP_LAYER_CHANGE' && onLayerChange) {
         onLayerChange(e.data.layer);
       }
+      if (e.data?.type === 'MAP_BEARING_CHANGE' && onBearingChange) {
+        onBearingChange(e.data.bearing);
+      }
       if (e.data?.type === 'MAP_READY') {
         setIsMapReady(true);
         mapReadyRef.current = true;
@@ -301,6 +330,9 @@ const MapComponent = React.memo(({
         }
         syncStopImages(stopImagesByStop);
         syncUserLocation(userLocation);
+        if (highlightedStop) {
+          flyToStop(highlightedStop);
+        }
         if (pendingRecenterRef.current) {
           pendingRecenterRef.current = false;
           flyToUser();
@@ -339,7 +371,7 @@ const MapComponent = React.memo(({
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onLayerChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange]);
+  }, [onLayerChange, onBearingChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange, highlightedStop, flyToStop]);
 
   // Skip the very first render (trigger starts at 0) — only fire when the
   // parent actually bumps the counter in response to a tap (or the
@@ -370,6 +402,66 @@ const MapComponent = React.memo(({
       pendingRecenterRouteRef.current = true;
     }
   }, [recenterRouteTrigger, flyToRoute]);
+
+  // Fly to + highlight whatever stop is currently searched/selected in the
+  // destination bar. Unlike the trigger counters above, this runs off the
+  // stop value itself, so picking a *different* stop while one is already
+  // highlighted flies again to the new one. If the map isn't ready yet this
+  // is a no-op here - the MAP_READY handler above resends the current
+  // highlightedStop once the iframe finishes loading, same as it does for
+  // userLocation.
+  useEffect(() => {
+    if (!mapReadyRef.current) return;
+    if (highlightedStop) {
+      flyToStop(highlightedStop);
+    } else {
+      clearHighlightedStop();
+    }
+  }, [highlightedStop, flyToStop, clearHighlightedStop]);
+
+  // Compass and layer-toggle buttons are rendered by HomeScreen (so they can
+  // live in the unified bottom sheet's top-actions row and drag with it)
+  // instead of inside this iframe. These two triggers are the same
+  // skip-first-render counter pattern as recenterUserTrigger/
+  // recenterRouteTrigger above - HomeScreen bumps them on tap, and that's
+  // forwarded into the iframe as a postMessage the embedded map script
+  // already knows how to act on.
+  const isFirstResetBearingRef = useRef(true);
+  useEffect(() => {
+    if (isFirstResetBearingRef.current) {
+      isFirstResetBearingRef.current = false;
+      return;
+    }
+    try {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'RESET_BEARING' }, '*');
+    } catch (e) {}
+  }, [resetBearingTrigger]);
+
+  const isFirstToggleLayerRef = useRef(true);
+  useEffect(() => {
+    if (isFirstToggleLayerRef.current) {
+      isFirstToggleLayerRef.current = false;
+      return;
+    }
+    try {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'TOGGLE_LAYER' }, '*');
+    } catch (e) {}
+  }, [toggleLayerTrigger]);
+
+  // 2D/3D tilt toggle - same skip-first-render counter pattern as the
+  // triggers above. The iframe script tracks its own is3D flag and eases
+  // pitch between 0 and 45 in response (see toggle3D() inside
+  // generateHTML), so this just needs to forward the bump.
+  const isFirstToggle3DRef = useRef(true);
+  useEffect(() => {
+    if (isFirstToggle3DRef.current) {
+      isFirstToggle3DRef.current = false;
+      return;
+    }
+    try {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'TOGGLE_3D' }, '*');
+    } catch (e) {}
+  }, [toggle3DTrigger]);
 
   const generateHTML = useCallback(() => {
     const lat = center[0];
@@ -406,25 +498,6 @@ const MapComponent = React.memo(({
     *{margin:0;padding:0;box-sizing:border-box}
     body{overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
     #map{height:100vh;width:100vw}
-    .map-controls{
-      position:absolute;bottom:30px;left:12px;
-      display:flex;flex-direction:column;gap:8px;z-index:100
-    }
-    @media (max-width: 768px) {
-      .map-controls{
-        bottom: 80px;
-      }
-    }
-    .ctrl-btn{
-      width:44px;height:44px;border-radius:50%;
-      border:2.5px solid #fff;
-      box-shadow:0 2px 10px rgba(0,0,0,0.45);
-      cursor:pointer;overflow:hidden;background:#fff;
-      display:flex;align-items:center;justify-content:center;
-      -webkit-tap-highlight-color:transparent;user-select:none
-    }
-    .ctrl-btn img{width:100%;height:100%;object-fit:cover;display:block}
-    #compassSvg{transition:transform 0.15s ease-out;display:block}
     .maplibregl-ctrl-bottom-right,.maplibregl-ctrl-bottom-left,
     .maplibregl-ctrl-top-right,.maplibregl-ctrl-top-left{display:none}
     /* ── Custom attribution (maplibre's own control is disabled above) ── */
@@ -494,6 +567,28 @@ const MapComponent = React.memo(({
     .nearby-stop-dot--photo{
       width:22px;height:22px;
       box-shadow:0 0 0 2px rgba(255,255,255,0.85),0 2px 6px rgba(0,0,0,0.45);
+    }
+    /* ── Highlighted state — applied to whichever nearby dot is currently
+       searched/selected via the destination bar (instead of plotting a
+       separate marker, we just re-style that same dot: bigger, with a
+       pulsing halo behind it). --hl-pulse-color is set inline per-stop
+       (see drawHighlightStop) to match the app's primary color. ── */
+    .nearby-stop-dot--highlighted{
+      width:28px;height:28px;
+      box-shadow:0 0 0 3px #fff,0 2px 10px rgba(0,0,0,0.5);
+    }
+    .nearby-stop-dot--highlighted::before{
+      content:'';
+      position:absolute;top:50%;left:50%;width:100%;height:100%;
+      transform:translate(-50%,-50%) scale(1);
+      border-radius:50%;
+      background:var(--hl-pulse-color, rgba(107,33,168,0.35));
+      animation:nearbyStopHighlightPulse 1.6s ease-out infinite;
+      pointer-events:none;
+    }
+    @keyframes nearbyStopHighlightPulse{
+      0%{ transform:translate(-50%,-50%) scale(0.9); opacity:0.85; }
+      100%{ transform:translate(-50%,-50%) scale(2.6); opacity:0; }
     }
 
     /* ── Toast — brief confirmation banner (e.g. photo upload success) ── */
@@ -601,23 +696,6 @@ const MapComponent = React.memo(({
 <div id="mapAttribution" class="map-attribution"></div>
 
 
-<div class="map-controls">
-  <!-- Compass / north reset -->
-  <div class="ctrl-btn" id="northBtn" onclick="resetBearing()" title="Reset North">
-    <svg id="compassSvg" viewBox="0 0 40 40" width="50" height="50" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="0"/>
-      <path d="M20 4 L23.5 20 L20 18 L16.5 20 Z" fill="#e84040"/>
-      <path d="M20 36 L23.5 20 L20 22 L16.5 20 Z" fill="#9ca3af"/>
-      <circle cx="20" cy="20" r="3" fill="#1e293b"/>
-      <circle cx="20" cy="20" r="1.5" fill="white"/>
-    </svg>
-  </div>
-  <!-- Layer toggle -->
-  <div class="ctrl-btn" id="layerBtn" onclick="toggleLayer()" title="Toggle map layer">
-    <img id="layerThumb" src="" alt="layer"/>
-  </div>
-</div>
-
 <script>
 // ── Styles ───────────────────────────────────────────────────────────────────
 var NORMAL_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
@@ -642,9 +720,16 @@ var VOLUNTEER_MODE = ${volunteerModeFlag};
 // ── State ────────────────────────────────────────────────────────────────────
 var currentLayer    = '${initialLayer}';
 var mapReady        = false;
+// Mirrors the map's actual pitch - starts true since the map below is
+// initialized at pitch:45 (tilted/3D) already. Read by resetBearing() and
+// by toggleLayer()'s normal-branch style reload so both respect whichever
+// 2D/3D mode is currently active instead of forcing pitch back to 45.
+var is3D             = true;
 var routeBounds     = null;
 var stopMarkers     = [];
 var nearbyMarkers   = [];
+var highlightedStopData = null;  // the {lat,lng,id,...} currently highlighted, or null
+var highlightedNearbyEntry = null; // the nearby-stop-dot entry currently enlarged+pulsing for it
 var photoMarkers    = [];
 var photoBadgeEls   = {};
 var stopsById       = {};
@@ -685,9 +770,6 @@ var map = new maplibregl.Map({
   zoom:13, pitch:45, bearing:0,
   antialias:true, attributionControl:false
 });
-
-// Thumbnail shows the OTHER layer (what you'll switch TO)
-document.getElementById('layerThumb').src = currentLayer === 'satellite' ? OSM_THUMB : SAT_THUMB;
 
 // ── Attribution — required by OpenFreeMap/OSM's data license and Esri's
 // terms of use. Swaps automatically with the active layer (see toggleLayer).
@@ -764,15 +846,26 @@ map.on('moveend', reportViewport);
 
 // ── Compass — rotates opposite to map bearing ─────────────────────────────────
 function updateCompass() {
-  var needle = document.getElementById('compassSvg');
-  if (needle) needle.style.transform = 'rotate(' + (-map.getBearing()) + 'deg)';
+  // The compass needle itself now lives in the React shell (as part of the
+  // unified bottom sheet's top-actions row) so it can drag with the sheet -
+  // this just reports the live bearing up to it on every rotate.
+  try { window.parent.postMessage({ type: 'MAP_BEARING_CHANGE', bearing: map.getBearing() }, '*'); } catch(e) {}
 }
 map.on('rotate', updateCompass);
 map.on('rotateend', updateCompass);
 
 // ── North / bearing reset ─────────────────────────────────────────────────────
 function resetBearing() {
-  map.easeTo({ bearing:0, pitch:45, duration:400 });
+  // Respect whichever 2D/3D mode is currently active rather than forcing
+  // the map back into a tilted view - resetting north shouldn't also
+  // silently re-tilt a map the user flattened out on purpose.
+  map.easeTo({ bearing:0, pitch: is3D ? 45 : 0, duration:400 });
+}
+
+// ── 2D / 3D tilt toggle ────────────────────────────────────────────────────────
+function toggle3D() {
+  is3D = !is3D;
+  map.easeTo({ pitch: is3D ? 45 : 0, duration:400 });
 }
 
 // ── Layer toggle ──────────────────────────────────────────────────────────────
@@ -781,7 +874,6 @@ function toggleLayer() {
     // Switch TO satellite
     map.setStyle(SATELLITE_STYLE);
     currentLayer = 'satellite';
-    document.getElementById('layerThumb').src = OSM_THUMB;
     updateAttribution();
     // Notify parent React app of layer change
     try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'satellite' }, '*'); } catch(e) {}
@@ -790,13 +882,12 @@ function toggleLayer() {
     // Switch back TO normal
     map.setStyle(NORMAL_STYLE);
     currentLayer = 'normal';
-    document.getElementById('layerThumb').src = SAT_THUMB;
     updateAttribution();
     // Notify parent React app of layer change
     try { window.parent.postMessage({ type: 'MAP_LAYER_CHANGE', layer: 'normal' }, '*'); } catch(e) {}
     map.once('styledata', function() {
       mapReady = true;
-      map.setPitch(45);
+      map.setPitch(is3D ? 45 : 0);
       try {
         if (map.getSource('openmaptiles')) {
           map.addLayer({
@@ -1156,6 +1247,37 @@ function drawStops() {
   });
 }
 
+// ── Highlighted search stop ──────────────────────────────────────────────────
+// Instead of plotting a separate marker for whatever stop the user just
+// found via the destination bar (typed search, a suggestion, or a Stops
+// Near You card), we reuse that same stop's own nearby-stop dot - enlarging
+// it and giving it a pulsing halo (see .nearby-stop-dot--highlighted /
+// ensureNearbyEntryFor below) - rather than layering a second marker on
+// top of it. Driven entirely by FLY_TO_STOP / CLEAR_HIGHLIGHT_STOP
+// messages rather than the stops/route lifecycle.
+function drawHighlightStop(stop) {
+  clearHighlightStop();
+  if (!mapReady || !stop) return;
+
+  var entry = ensureNearbyEntryFor(stop);
+  if (!entry) return; // no usable coordinates - nothing to highlight
+
+  highlightedStopData = stop;
+  highlightedNearbyEntry = entry;
+  entry.el.style.setProperty('--hl-pulse-color', hexToRgba(PRIMARY_COLOR, 0.35));
+  entry.el.classList.add('nearby-stop-dot--highlighted');
+  updateNearbyStopVisibility();
+}
+
+function clearHighlightStop() {
+  if (highlightedNearbyEntry) {
+    highlightedNearbyEntry.el.classList.remove('nearby-stop-dot--highlighted');
+  }
+  highlightedStopData = null;
+  highlightedNearbyEntry = null;
+  updateNearbyStopVisibility();
+}
+
 // ── Nearby-stops layer ────────────────────────────────────────────────────────
 // Solid black dots marking every approved stop within range of the user's
 // location. Tap once to see the stop's name; tap again quickly (or
@@ -1187,6 +1309,37 @@ function nearbyKeyFor(stop) {
   return stop.id != null ? String(stop.id) : (stop.lat + ',' + stop.lng);
 }
 
+// Finds the nearby-dot entry (if any) representing the same stop as 'stop' -
+// used to hide/restore that dot in step with the highlight pin.
+function findNearbyEntryFor(stop) {
+  if (!stop) return null;
+  var key = nearbyKeyFor(stop);
+  for (var i = 0; i < nearbyMarkerEntries.length; i++) {
+    if (nearbyKeyFor(nearbyMarkerEntries[i].stop) === key) return nearbyMarkerEntries[i];
+  }
+  return null;
+}
+
+// Returns the nearby-dot entry for 'stop', creating one on the spot (via
+// the same createNearbyStopMarker used for every other nearby dot - same
+// popup, same tap-to-fill behavior) if it doesn't exist yet, e.g. this
+// area's nearby stops are still loading when a search lands. Once created
+// it's a real nearby dot going forward - addNearbyStopsIncremental's own
+// dedup (nearbyStopKeys) skips it if the same stop arrives again in a
+// later batch.
+function ensureNearbyEntryFor(stop) {
+  var existing = findNearbyEntryFor(stop);
+  if (existing) return existing;
+  if (typeof stop.lat !== 'number' || typeof stop.lng !== 'number') return null;
+  var key = nearbyKeyFor(stop);
+  if (!nearbyStopKeys.has(key)) {
+    nearbyStopKeys.add(key);
+    nearbyStopsData.push(stop);
+  }
+  createNearbyStopMarker(stop);
+  return findNearbyEntryFor(stop);
+}
+
 // Cheap, stable string hash so the same stop always lands in the same
 // declutter tier (0-3) instead of flickering between shown/hidden sets
 // as data comes in different order.
@@ -1211,6 +1364,14 @@ function updateNearbyStopVisibility() {
 
   if (ROUTE_ACTIVE) {
     nearbyMarkerEntries.forEach(function(entry) {
+      // The highlighted stop's dot stays visible even while a route is on
+      // screen (which otherwise hides every nearby dot) - it's not really
+      // a "nearby dot" at that point, it's standing in for the searched stop.
+      if (entry === highlightedNearbyEntry) {
+        entry.el.style.opacity = '1';
+        entry.el.style.pointerEvents = 'auto';
+        return;
+      }
       entry.el.style.opacity = '0';
       entry.el.style.pointerEvents = 'none';
     });
@@ -1220,6 +1381,16 @@ function updateNearbyStopVisibility() {
   var allowedTier = allowedTierForZoom(map.getZoom());
 
   nearbyMarkerEntries.forEach(function(entry) {
+    // The dot standing in for whatever stop is currently highlighted (flown
+    // to via the destination bar) stays visible regardless of the usual
+    // tier/spotlight rules - see .nearby-stop-dot--highlighted for the
+    // enlarged+pulsing look applied to it.
+    if (entry === highlightedNearbyEntry) {
+      entry.el.style.opacity = '1';
+      entry.el.style.pointerEvents = 'auto';
+      return;
+    }
+
     var visible = entry.tier <= allowedTier;
 
     if (visible && mousePx) {
@@ -1397,11 +1568,25 @@ function redrawAllNearbyMarkers() {
   nearbyMarkers.forEach(function(m) { m.remove(); });
   nearbyMarkers = [];
   nearbyMarkerEntries = [];
-  if (!mapReady || ROUTE_ACTIVE) return;
+  if (!mapReady || ROUTE_ACTIVE) {
+    highlightedNearbyEntry = null; // its marker just got torn down along with the rest
+    return;
+  }
   nearbyStopsData.forEach(function(stop) {
     if (typeof stop.lat !== 'number' || typeof stop.lng !== 'number') return;
     createNearbyStopMarker(stop);
   });
+  // nearbyMarkerEntries was just rebuilt from scratch, so the old
+  // highlightedNearbyEntry reference (if any) points at a torn-down
+  // element - re-resolve it and reapply the enlarged+pulsing look to its
+  // replacement (a fresh dot has none of that styling on it yet).
+  if (highlightedStopData) {
+    highlightedNearbyEntry = findNearbyEntryFor(highlightedStopData);
+    if (highlightedNearbyEntry) {
+      highlightedNearbyEntry.el.style.setProperty('--hl-pulse-color', hexToRgba(PRIMARY_COLOR, 0.35));
+      highlightedNearbyEntry.el.classList.add('nearby-stop-dot--highlighted');
+    }
+  }
   updateNearbyStopVisibility();
 }
 
@@ -1676,6 +1861,15 @@ function openLightbox(stop) {
 // ── Messages from React (photo data sync + upload results) ──────────────────
 window.addEventListener('message', function(e) {
   if (!e.data) return;
+  if (e.data.type === 'RESET_BEARING') {
+    resetBearing();
+  }
+  if (e.data.type === 'TOGGLE_LAYER') {
+    toggleLayer();
+  }
+  if (e.data.type === 'TOGGLE_3D') {
+    toggle3D();
+  }
   if (e.data.type === 'FLY_TO_USER') {
     if (userLoc && mapReady) {
       map.flyTo({ center: [userLoc.lng, userLoc.lat], zoom: Math.max(map.getZoom(), 15), essential: true });
@@ -1685,6 +1879,16 @@ window.addEventListener('message', function(e) {
     if (routeBounds && mapReady) {
       map.fitBounds(routeBounds, { padding: 60, animate: true, duration: 800 });
     }
+  }
+  if (e.data.type === 'FLY_TO_STOP') {
+    var hStop = e.data.stop;
+    if (mapReady && hStop && typeof hStop.lat === 'number' && typeof hStop.lng === 'number') {
+      map.flyTo({ center: [hStop.lng, hStop.lat], zoom: Math.max(map.getZoom(), 16), essential: true });
+      drawHighlightStop(hStop);
+    }
+  }
+  if (e.data.type === 'CLEAR_HIGHLIGHT_STOP') {
+    clearHighlightStop();
   }
   if (e.data.type === 'USER_LOCATION_UPDATE') {
     userLoc = e.data.location || null;

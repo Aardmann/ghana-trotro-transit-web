@@ -2,14 +2,14 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { 
   ArrowUpDown, Copy, Info, Lock, MapPin, Navigation, 
   Search, Share2, User, X, Plus, History, Key, 
-  Mail, Phone, Globe, Clock, Map,
+  Mail, Phone, Globe, Clock, Map as MapIcon,
   ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   ArrowLeft, ArrowRight, Trash2,
   Bus, CheckCircle, Calendar, Thermometer, Hash,
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
   Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
-  Menu, TrendingUp, Compass, MessageCircle
+  Menu, TrendingUp, Compass, MessageCircle, Bell
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -44,6 +44,15 @@ import SeoContent from './SeoContent';
 
 // Users with more than this many contributions get the trotro badge next to their name.
 const CONTRIBUTOR_BADGE_THRESHOLD = 5;
+
+// ── Client-side cache / request-guard tuning ───────────────────────────────
+// These bound how often the app is willing to re-hit Supabase for the same
+// thing in a short span - protects against accidental hammering (double
+// taps, held-down Enter, rapid re-opens of a modal), not a substitute for
+// real server-side rate limiting.
+const NOTIFICATIONS_CACHE_TTL_MS = 60 * 1000; // re-open within a minute reuses the fetched list
+const DEST_BAR_SEARCH_CACHE_TTL_MS = 30 * 1000; // repeat/identical "Search" presses reuse the result
+const DEST_BAR_SEARCH_MIN_INTERVAL_MS = 400; // minimum gap between two Search presses, any query
 
 // Standard multi-color Google "G" mark, used on the "Continue with Google" button.
 const GoogleIcon = ({ size = 18 }) => (
@@ -595,6 +604,26 @@ const fetchCompositeSegments = async (routeId) => {
   return { segments, mapStops };
 };
 
+// Whether a route's endpoint stop names match a user's typed start/destination
+// text - the same "loose" substring match (either side can contain the
+// other, case-insensitive) used everywhere a search query is matched against
+// stop names. Pulled out into one function so route search, the live
+// realtime refresh, and popularity scoring can't drift out of sync with
+// each other.
+const routeEndpointsMatchQuery = (firstStopName, lastStopName, queryStart, queryDest) => {
+  if (!firstStopName || !lastStopName || !queryStart || !queryDest) return false;
+
+  const startName = firstStopName.toLowerCase();
+  const destName = lastStopName.toLowerCase();
+  const userStart = queryStart.toLowerCase();
+  const userDest = queryDest.toLowerCase();
+
+  const startMatches = startName.includes(userStart) || userStart.includes(startName);
+  const destMatches = destName.includes(userDest) || userDest.includes(destName);
+
+  return startMatches && destMatches;
+};
+
 // Format a single route row from Supabase into the app's route shape.
 const formatRoute = async (route) => {
   if (route.is_composite) {
@@ -633,6 +662,126 @@ const formatRoute = async (route) => {
       vehicle_type:     rs.stops.vehicle_type ?? null,
     })),
   };
+};
+
+// ── StopResultCard ──────────────────────────────────────────────────────
+// One entry in the destination-bar search-results list (see
+// renderStopSearchResultsContent below) - same visual layout as a single
+// stop's detail view (name + distance, Directions, photos, stops nearby),
+// just repeated once per matching stop instead of shown for only one.
+// A standalone component (rather than inline JSX in a .map()) because each
+// card fetches and owns its own approved-photos list independently of the
+// others.
+const StopResultCard = ({ stop, userLocation, nearbyStops, onDirections, onSelectNearbyStop, onOpenLightbox }) => {
+  const [images, setImages] = useState([]);
+  const [imagesLoading, setImagesLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImagesLoading(true);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('stop_images')
+          .select('*')
+          .eq('stop_id', stop.id)
+          .eq('approved', true);
+        if (!cancelled && !error && data) setImages(data);
+      } catch (err) {
+        console.error('Error fetching stop images:', err);
+      } finally {
+        if (!cancelled) setImagesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stop.id]);
+
+  const distance = useMemo(() => {
+    if (!userLocation || typeof stop.lat !== 'number' || Number.isNaN(stop.lat)) return null;
+    return haversineKm(userLocation.lat, userLocation.lng, stop.lat, stop.lng);
+  }, [userLocation, stop]);
+
+  const nearby = useMemo(() => {
+    if (typeof stop.lat !== 'number' || Number.isNaN(stop.lat)) return [];
+    return nearbyStops
+      .filter((s) => s.id !== stop.id)
+      .map((s) => ({ stop: s, distance: haversineKm(stop.lat, stop.lng, s.lat, s.lng) }))
+      .filter(({ distance: d }) => d <= 1)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10);
+  }, [stop, nearbyStops]);
+
+  return (
+    <div className="stop-search-result-card">
+      <div className="stop-detail-summary-row">
+        <div className="stop-detail-summary-info">
+          <span className="stop-detail-summary-name">{stop.name}</span>
+          {distance != null && (
+            <span className="stop-detail-summary-distance">{distance.toFixed(1)}km away</span>
+          )}
+        </div>
+
+        <button
+          className="stop-detail-directions-button"
+          onClick={() => onDirections(stop)}
+          aria-label="Directions"
+          title="Directions"
+        >
+          <Navigation size={16} color="#FFFFFF" />
+          <span className="stop-detail-directions-label">Directions</span>
+        </button>
+      </div>
+
+      <div className="stop-detail-images">
+        {imagesLoading ? (
+          <div className="stop-detail-images-placeholder">
+            <div className="loading-spinner"></div>
+          </div>
+        ) : images.length > 0 ? (
+          <div className="stop-detail-images-scroll">
+            {images.map((img, index) => (
+              <button
+                key={img.id}
+                type="button"
+                className="stop-detail-image-button"
+                onClick={() => onOpenLightbox(images, stop.name, index)}
+                aria-label={`View photo ${index + 1} of ${images.length} for ${stop.name}`}
+              >
+                <img src={img.url} alt={stop.name} className="stop-detail-image" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="stop-detail-images-placeholder">
+            <MapPin size={32} color={COLORS.primary} />
+          </div>
+        )}
+      </div>
+
+      <div className="stop-detail-nearby">
+        <span className="destination-bar-section-title">Stops nearby</span>
+        <div className="destination-bar-hscroll">
+          {nearby.length > 0 ? (
+            nearby.map(({ stop: nearStop, distance: d }) => (
+              <button
+                key={nearStop.id}
+                className="destination-bar-card"
+                onClick={() => onSelectNearbyStop(nearStop)}
+              >
+                <div className="destination-bar-card-icon">
+                  <MapPin size={18} color={COLORS.primary} />
+                </div>
+                <span className="destination-bar-card-name">{nearStop.name}</span>
+                <span className="destination-bar-card-sub">{d.toFixed(1)}km away</span>
+              </button>
+            ))
+          ) : (
+            <p className="destination-bar-empty">No other stops nearby.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const GhanaTrotroTransit = () => {
@@ -694,6 +843,29 @@ const GhanaTrotroTransit = () => {
   const [recenterUserTrigger, setRecenterUserTrigger] = useState(0);
   // Bumped to tell MapComponent to fly the map to fit the current route.
   const [recenterRouteTrigger, setRecenterRouteTrigger] = useState(0);
+  // The stop currently searched/selected via the destination bar (typed
+  // search, a suggestion, or a Stops Near You card) - null when nothing's
+  // highlighted. Set in openStopDetail, cleared in closeStopDetail. Passed
+  // straight to MapComponent, which flies to it and drops a highlight pin.
+  const [highlightedStop, setHighlightedStop] = useState(null);
+  // The compass and layer-toggle buttons live in the unified bottom sheet's
+  // top-actions row (so they drag with the sheet) instead of inside the map
+  // iframe - these two triggers are the same bump-a-counter pattern as
+  // recenterUserTrigger/recenterRouteTrigger above, forwarded into the
+  // iframe by MapComponent. mapBearing is the live map rotation reported
+  // back out, so the compass needle rendered here can track it.
+  const [resetBearingTrigger, setResetBearingTrigger] = useState(0);
+  const [toggleLayerTrigger, setToggleLayerTrigger] = useState(0);
+  const [mapBearing, setMapBearing] = useState(0);
+  // Same bump-a-counter pattern, for the Apple-Maps-style "3D" pill button
+  // in the sheet's control cluster. is3DActive mirrors the map's actual
+  // pitch (MapComponent's iframe starts at pitch:45, i.e. already
+  // tilted/3D, so this starts true) and just flips the button's own
+  // label/pressed state instantly; the real pitch change happens inside
+  // MapComponent when it sees toggle3DTrigger change (see its own
+  // toggle3D()/TOGGLE_3D handling).
+  const [toggle3DTrigger, setToggle3DTrigger] = useState(0);
+  const [is3DActive, setIs3DActive] = useState(true);
   const locationRequestedRef = useRef(false);
   // Whether enough time has passed since asking for location that, if the
   // marker still isn't showing, we can nudge the user to enable it. Delayed
@@ -960,12 +1132,43 @@ const GhanaTrotroTransit = () => {
   
   // Modal states
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showBottomSheet, setShowBottomSheet] = useState(false);
-  const [bottomSheetContent, setBottomSheetContent] = useState('search'); // 'search' or 'route'
+  // The bottom sheet itself is always mounted (see the single persistent
+  // sheet further down) - this just picks which content it's showing.
+  // 'destination' is the ambient idle view (replaces the old standalone
+  // destination bar); 'search' is the fuller find-a-route form; 'route' is
+  // the swipeable route-details/route-info pair; 'stop-detail' replaces the
+  // old standalone stop detail panel.
+  const [bottomSheetContent, setBottomSheetContent] = useState('destination');
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showSearchHistoryModal, setShowSearchHistoryModal] = useState(false);
   const [showCreatedRoutesModal, setShowCreatedRoutesModal] = useState(false);
+  // Notifications modal (Profile menu, below Search History) - lists this
+  // user's rows from user_notifications joined with the shared notifications
+  // table. Fetched on demand when the modal is opened, not kept warm like
+  // searchHistory, since there's no other screen that needs it.
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [userNotifications, setUserNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState(null);
+  // Same session-guard shape as exploreFetchedRef/popularityFetchedRef below:
+  // fetched once per signed-in user and reused (within TTL) on every
+  // re-open, instead of hitting Supabase on each open of the modal.
+  // notificationsCacheRef also carries the last-fetched rows so mark-as-read
+  // updates can be written back into it (see handleNotificationRowClick /
+  // handleMarkAllNotificationsRead) and don't get clobbered by a cache hit.
+  const notificationsFetchedRef = useRef(false);
+  const notificationsInFlightRef = useRef(false);
+  const notificationsCacheRef = useRef({ userId: null, data: null, fetchedAt: 0 });
   const [showRouteNotFoundModal, setShowRouteNotFoundModal] = useState(false);
+  // Shown when a destination-bar search (handleDestBarSearch) turns up no
+  // matching stops - replaces the old bare alert() with a modal that also
+  // offers to add the missing stop.
+  const [showStopNotFoundModal, setShowStopNotFoundModal] = useState(false);
+  const [stopNotFoundQuery, setStopNotFoundQuery] = useState('');
+  // Carries the searched-for name from the stop-not-found modal into
+  // volunteer mode, so the first "Add a Stop" form the user sees on tapping
+  // the map is prefilled instead of blank. Consumed (cleared) on first use.
+  const [pendingStopNameHint, setPendingStopNameHint] = useState('');
   const [showSignOutConfirmModal, setShowSignOutConfirmModal] = useState(false);
   const [signOutLoading, setSignOutLoading] = useState(false);
   const [showSignOutSuccessModal, setShowSignOutSuccessModal] = useState(false);
@@ -980,6 +1183,12 @@ const GhanaTrotroTransit = () => {
   const [exploreLoading, setExploreLoading] = useState(false);
   const [exploreError, setExploreError] = useState(null);
   const exploreFetchedRef = useRef(false);
+  // Aggregated { start_point, destination, search_count } rows from every
+  // user's search history (see get_search_history_popularity() in Supabase),
+  // used to rank Popular Routes wherever it's shown (Explore drawer and the
+  // destination bar). Fetched once per session, alongside exploreRoutes.
+  const [searchPopularity, setSearchPopularity] = useState([]);
+  const popularityFetchedRef = useRef(false);
 
   // Profile modal - Account sub-view state
   const [profileView, setProfileView] = useState('menu'); // 'menu' | 'account'
@@ -1119,18 +1328,96 @@ const GhanaTrotroTransit = () => {
   const touchStartYRef = useRef(null);
   const swipeAxisLockRef = useRef(null); // 'x' | 'y' | null - decided once per gesture
 
-  // ── Vertical drag / snap state ──────────────────────────────────────────────
-  const SNAP_HEIGHTS = [32, 58, 88]; // vh: peek, half, full
-  const [sheetSnapIndex, setSheetSnapIndex] = useState(1);
-  const [sheetDragHeight, setSheetDragHeight] = useState(SNAP_HEIGHTS[1]);
+  // ── Vertical drag / snap state for the single persistent bottom sheet ──────
+  // Shared by every content type the sheet can show (destination, search,
+  // route details/info, stop detail) - replaces the old dual system where a
+  // modal-style "bottom sheet" had its own drag physics and a separate,
+  // no-overlay "destination bar" had a different one. Three resting
+  // heights: peek (just the top row of whatever content is showing), half,
+  // and full - the sheet is never fully hidden, "closing" something just
+  // drops it back to peek. On mobile/tablet widths "full" goes almost all
+  // the way to the top of the screen; wider desktop layouts keep a more
+  // modest ceiling so it doesn't swallow the whole map. 1023px matches the
+  // mobile-vs-"PC" breakpoint used elsewhere in this file (see
+  // .app-title-top-left). Exposed as a function (not just a render-scope
+  // const) because the pointer-move/up handlers are memoized with an empty
+  // dependency array and need to read the *current* viewport at drag time,
+  // not whatever it was on mount.
+  // Peek height is viewport-relative (vh) like the half/full snaps below,
+  // but what it needs to fit is a fixed-px amount of content - just the
+  // drag handle + the quick-search row (everything else is display:none
+  // at peek, see .bottom-sheet.sheet-at-peek in HomeScreen.css) - so this
+  // is sized to hug that content on typical mobile viewport heights
+  // rather than the old 16, which left a visible strip of empty white
+  // space below the search row on most phones.
+  const SHEET_PEEK = 7.5;
+  const getSheetLimits = () => {
+    const full = window.innerWidth <= 1023 ? 85 : 56;
+    const half = (SHEET_PEEK + full) / 2;
+    return { peek: SHEET_PEEK, half, full };
+  };
+  const defaultSnapHeights = () => {
+    const { peek, half, full } = getSheetLimits();
+    return [peek, half, full];
+  };
+  const SNAP_HEIGHTS = defaultSnapHeights(); // vh: peek, half, full
+  const [sheetSnapIndex, setSheetSnapIndex] = useState(0);
+  const [sheetDragHeight, setSheetDragHeight] = useState(SNAP_HEIGHTS[0]);
   const [sheetIsDragging, setSheetIsDragging] = useState(false);
-  const sheetDragRef = useRef({ active: false, startY: 0, startH: SNAP_HEIGHTS[1], currentH: SNAP_HEIGHTS[1] });
+  const sheetDragRef = useRef({
+    active: false,
+    startY: 0,
+    startH: SNAP_HEIGHTS[0],
+    currentH: SNAP_HEIGHTS[0],
+    snapHeights: SNAP_HEIGHTS,
+  });
+
+  // True once the sheet has been dragged/expanded past its peek height -
+  // used to lazy-load Popular Routes / Stops Near You (same trigger the old
+  // destination bar used), regardless of which content is currently showing.
+  const isSheetExpanded = sheetDragHeight > SHEET_PEEK + 0.5;
+
+  // True once the sheet has been dragged (or snapped) at or past its half
+  // height - the top-actions row (compass, layer toggle, info, locate,
+  // Google Maps, recenter-route) hides past this point so it doesn't
+  // crowd whichever content the sheet is showing as it grows taller.
+  const isSheetPastHalfway = sheetDragHeight >= (sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1];
+
+  // True once the sheet is at (or nearly at) its full snap height - the
+  // control cluster (compass, 3D, layer toggle, info, locate, etc.) hides
+  // completely past this point since there's no map left above the sheet
+  // for it to sit over, same as Apple Maps' own controls disappearing once
+  // its sheet covers almost the whole screen.
+  const isSheetNearFull = sheetDragHeight >= (sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2] - 2;
+
+  // Stop detail - shown after picking a stop via the destination content (search,
+  // a suggestion, or a Stops Near You card). Images are fetched per-stop.
+  const [selectedStopDetail, setSelectedStopDetail] = useState(null);
+  const [stopDetailImages, setStopDetailImages] = useState([]);
+  const [stopDetailImagesLoading, setStopDetailImagesLoading] = useState(false);
+  // Full-size preview for a tapped stop-detail photo - null when closed,
+  // otherwise the index into stopDetailImages currently being shown.
+  const [stopImageLightboxIndex, setStopImageLightboxIndex] = useState(null);
+
+  // Destination-bar search results - up to 7 stops whose name matches what
+  // was typed, each shown with the same layout as the single stop detail
+  // view above (see StopResultCard / renderStopSearchResultsContent).
+  const [stopSearchResults, setStopSearchResults] = useState([]);
+  // Full-size photo preview shared across every result card, since only one
+  // can be open at a time regardless of which card it came from - null when
+  // closed, otherwise { name, images, index }.
+  const [resultLightbox, setResultLightbox] = useState(null);
 
   // ── Dynamic sheet height based on stop count ──────────────────────────────
   // Each stop row ~72px, header ~160px, summary cards ~80px, padding ~40px.
-  // The computed height becomes the maximum snap point for this route.
+  // The computed height becomes the maximum snap point while a route is
+  // showing. Once the route is cleared, the sheet's snap points fall back
+  // to the standard peek/half/full trio used by every other content type.
   useEffect(() => {
-    if (!selectedRoute) return;
+    if (!selectedRoute) {
+      sheetDragRef.current.snapHeights = SNAP_HEIGHTS;
+      return;
+    }
     const stopCount = selectedRoute.is_composite
       ? (selectedRoute.compositionSegments?.length ?? 0) + 1
       : (selectedRoute.stops?.length ?? 0);
@@ -1139,8 +1426,9 @@ const GhanaTrotroTransit = () => {
     const estimatedVh = Math.round((estimatedPx / viewportH) * 100);
     // Clamp: min 42 vh, max 88 vh - this is the new "full" snap
     const fullSnap = Math.min(Math.max(estimatedVh, 42), 88);
-    // Rebuild snap points with the computed full height
-    const newSnaps = [32, Math.round((32 + fullSnap) / 2), fullSnap];
+    // Rebuild snap points with the computed full height, keeping the same
+    // peek height every other content type rests at
+    const newSnaps = [SHEET_PEEK, Math.round((SHEET_PEEK + fullSnap) / 2), fullSnap];
     // Start at the mid snap
     const midIdx = 1;
     setSheetDragHeight(newSnaps[midIdx]);
@@ -1172,17 +1460,27 @@ const GhanaTrotroTransit = () => {
     return MAP_CONFIG.center;
   }, [memoizedRouteCoordinates]);
 
+  // Thumbnail for the layer-toggle button in the sheet's top-actions row -
+  // shows the OTHER layer (what tapping it will switch TO). Same tile math
+  // MapComponent uses internally to build the map itself, just done here
+  // too now that the button renders outside the iframe.
+  const layerThumbUrl = useMemo(() => {
+    const [lat, lng] = memoizedMapCenter;
+    const Z = 10;
+    const tX = Math.floor(((lng + 180) / 360) * Math.pow(2, Z));
+    const rawY = (1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2;
+    const tY = Math.floor(rawY * Math.pow(2, Z));
+    return mapMode === 'satellite'
+      ? `https://tile.openstreetmap.org/${Z}/${tX}/${tY}.png`
+      : `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Z}/${tY}/${tX}`;
+  }, [memoizedMapCenter, mapMode]);
+
   // Close modals when clicking outside
   const handleOverlayClick = useCallback((e, closeFunction) => {
     if (e.target === e.currentTarget) {
       closeFunction();
     }
   }, []);
-
-  // Close bottom sheet when clicking on overlay
-  const handleBottomSheetOverlayClick = useCallback((e) => {
-    handleOverlayClick(e, closeBottomSheet);
-  }, [handleOverlayClick]);
 
   // Close profile modal when clicking on overlay
   const handleProfileModalOverlayClick = useCallback((e) => {
@@ -1209,9 +1507,19 @@ const GhanaTrotroTransit = () => {
     handleOverlayClick(e, () => setShowCreatedRoutesModal(false));
   }, [handleOverlayClick]);
 
+  // Close notifications modal when clicking on overlay
+  const handleNotificationsModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowNotificationsModal(false));
+  }, [handleOverlayClick]);
+
   // Close route-not-found modal when clicking on overlay
   const handleRouteNotFoundModalOverlayClick = useCallback((e) => {
     handleOverlayClick(e, () => setShowRouteNotFoundModal(false));
+  }, [handleOverlayClick]);
+
+  // Close stop-not-found modal when clicking on overlay
+  const handleStopNotFoundModalOverlayClick = useCallback((e) => {
+    handleOverlayClick(e, () => setShowStopNotFoundModal(false));
   }, [handleOverlayClick]);
 
   // Check user on component mount
@@ -1316,6 +1624,130 @@ const GhanaTrotroTransit = () => {
       console.error('Error fetching user history:', error);
     }
   }, []);
+
+  // Fetches this user's notifications for the Notifications modal - each
+  // row of user_notifications joined with its shared notifications record.
+  // Guarded the same way fetchExploreRoutes guards routes: an in-session
+  // cache (notificationsCacheRef) serves repeat opens within
+  // NOTIFICATIONS_CACHE_TTL_MS for free, and notificationsInFlightRef stops
+  // two overlapping calls (e.g. a fast close/reopen) from both hitting
+  // Supabase. `force` (the modal's "Try Again" retry) skips both.
+  const fetchUserNotifications = useCallback(async (userId, force = false) => {
+    if (!force) {
+      const cache = notificationsCacheRef.current;
+      const isFresh = cache.userId === userId && cache.data && (Date.now() - cache.fetchedAt) < NOTIFICATIONS_CACHE_TTL_MS;
+      if (notificationsFetchedRef.current && isFresh) {
+        setUserNotifications(cache.data);
+        return;
+      }
+    }
+
+    if (notificationsInFlightRef.current) return;
+    notificationsInFlightRef.current = true;
+
+    setNotificationsLoading(true);
+    setNotificationsError(null);
+    try {
+      const { data, error } = await supabase
+        .from('user_notifications')
+        .select(`
+          id,
+          is_read,
+          read_at,
+          created_at,
+          notification:notifications (
+            id,
+            title,
+            message,
+            type,
+            category,
+            priority,
+            image_url,
+            action_url,
+            action_text,
+            created_at
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      const rows = data || [];
+      setUserNotifications(rows);
+      notificationsFetchedRef.current = true;
+      notificationsCacheRef.current = { userId, data: rows, fetchedAt: Date.now() };
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      notificationsFetchedRef.current = false; // allow a retry on next open
+      setNotificationsError('Could not load notifications. Please try again.');
+    } finally {
+      setNotificationsLoading(false);
+      notificationsInFlightRef.current = false;
+    }
+  }, []);
+
+  // Opens the Notifications modal from the Profile menu row and kicks off
+  // the fetch - guests get the same sign-in prompt used by the other
+  // account-only rows (Search History, Created Routes).
+  const handleOpenNotifications = useCallback(() => {
+    if (!user) {
+      setShowGuestSignIn(true);
+      return;
+    }
+    setShowNotificationsModal(true);
+    setShowProfileModal(false);
+    fetchUserNotifications(user.id);
+  }, [user, fetchUserNotifications]);
+
+  // Marks a single notification read on tap (optimistic locally, then
+  // persisted) and follows its action link, if it has one. Also patches the
+  // read state into notificationsCacheRef so a cache hit within the TTL
+  // (see fetchUserNotifications) doesn't hand back the stale unread copy.
+  const handleNotificationRowClick = useCallback(async (userNotification) => {
+    if (userNotification.notification?.action_url) {
+      window.open(userNotification.notification.action_url, '_blank', 'noopener,noreferrer');
+    }
+    if (userNotification.is_read) return;
+
+    const readAt = new Date().toISOString();
+    const applyRead = (list) => list.map((n) => (n.id === userNotification.id ? { ...n, is_read: true, read_at: readAt } : n));
+    setUserNotifications(applyRead);
+    if (notificationsCacheRef.current.data) {
+      notificationsCacheRef.current = { ...notificationsCacheRef.current, data: applyRead(notificationsCacheRef.current.data) };
+    }
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .update({ is_read: true, read_at: readAt })
+        .eq('id', userNotification.id);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  }, []);
+
+  // "Mark All Read" - same optimistic-then-persist approach as a single
+  // row, including the cache patch.
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    const unreadIds = userNotifications.filter((n) => !n.is_read).map((n) => n.id);
+    if (unreadIds.length === 0) return;
+
+    const readAt = new Date().toISOString();
+    const applyReadAll = (list) => list.map((n) => (n.is_read ? n : { ...n, is_read: true, read_at: readAt }));
+    setUserNotifications(applyReadAll);
+    if (notificationsCacheRef.current.data) {
+      notificationsCacheRef.current = { ...notificationsCacheRef.current, data: applyReadAll(notificationsCacheRef.current.data) };
+    }
+    try {
+      const { error } = await supabase
+        .from('user_notifications')
+        .update({ is_read: true, read_at: readAt })
+        .in('id', unreadIds);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
+  }, [userNotifications]);
 
   // Save search history - Supabase for signed-in users, an on-device
   // cookie for guests so they still get a "recent searches" list.
@@ -1502,11 +1934,19 @@ const GhanaTrotroTransit = () => {
   // Debounced per field (start vs destination get independent timers so
   // typing in one doesn't cancel a pending lookup for the other). Only the
   // actual network query is delayed - a cache hit still resolves instantly.
+  // suggestionsLatestQueryRef is the request guard on top of that: it tracks,
+  // per field, the query that field's dropdown should currently reflect. If
+  // the person keeps typing (or clears the field) while an earlier lookup is
+  // still in flight, that response is a wasted round trip once it lands - it
+  // gets discarded instead of overwriting the dropdown with stale results.
   const suggestionTimersRef = useRef({});
+  const suggestionsLatestQueryRef = useRef({});
   const fetchSuggestions = useCallback((query, type) => {
     if (suggestionTimersRef.current[type]) {
       clearTimeout(suggestionTimersRef.current[type]);
     }
+
+    suggestionsLatestQueryRef.current[type] = query;
 
     if (query.length < 2) {
       setSuggestions([]);
@@ -1529,6 +1969,10 @@ const GhanaTrotroTransit = () => {
           .ilike('name', `%${query}%`)
           .limit(5);
 
+        // Superseded by a newer query on this field while this was in
+        // flight - drop it rather than clobber what's now on screen.
+        if (suggestionsLatestQueryRef.current[type] !== query) return;
+
         if (!error && data) {
           setSuggestions(data);
           setCachedStopSearch(query, data);
@@ -1539,6 +1983,7 @@ const GhanaTrotroTransit = () => {
           setSuggestions(filtered);
         }
       } catch (error) {
+        if (suggestionsLatestQueryRef.current[type] !== query) return;
         console.error('Error fetching suggestions:', error);
         const filtered = SAMPLE_STOPS.filter(stop => 
           stop.name.toLowerCase().includes(query.toLowerCase())
@@ -1694,7 +2139,16 @@ const GhanaTrotroTransit = () => {
       setRoutes([]);
       setSelectedRoute(null);
       setSuggestions([]);
-      setShowBottomSheet(false);
+      setBottomSheetContent('destination');
+      setSheetSnapIndex(0);
+      setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[0]);
+
+      // Clear the notifications cache/guard along with the list itself -
+      // otherwise a different account signing in on this device would
+      // briefly see the previous user's cached notifications.
+      setUserNotifications([]);
+      notificationsFetchedRef.current = false;
+      notificationsCacheRef.current = { userId: null, data: null, fetchedAt: 0 };
 
       // Stop realtime subscriptions on sign out
       stopRealtimeSubscriptions();
@@ -1852,7 +2306,9 @@ const GhanaTrotroTransit = () => {
       setRoutes([]);
       setSelectedRoute(null);
       setSuggestions([]);
-      setShowBottomSheet(false);
+      setBottomSheetContent('destination');
+      setSheetSnapIndex(0);
+      setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[0]);
 
       alert('Account deleted: your account and all associated data have been deleted.');
     } catch (error) {
@@ -1913,6 +2369,7 @@ const GhanaTrotroTransit = () => {
     setVolunteerMode(false);
     setShowAddStopModal(false);
     setPendingStopCoords(null);
+    setPendingStopNameHint('');
   }, []);
 
   // Lets someone jump straight from "we don't have this route yet" into
@@ -1921,6 +2378,15 @@ const GhanaTrotroTransit = () => {
     setShowRouteNotFoundModal(false);
     setVolunteerMode(true);
   }, []);
+
+  // Lets someone jump straight from "we don't have this stop yet" (the
+  // destination-bar search miss) into volunteer mode, carrying over what
+  // they searched for so the add-stop form isn't blank.
+  const handleAddStopFromNotFound = useCallback(() => {
+    setShowStopNotFoundModal(false);
+    setPendingStopNameHint(stopNotFoundQuery);
+    setVolunteerMode(true);
+  }, [stopNotFoundQuery]);
 
   // Called by MapComponent when the map is tapped. While pickingUpdateLocation
   // is on (from the Update Stop modal) this sets the new coordinates and
@@ -1935,11 +2401,12 @@ const GhanaTrotroTransit = () => {
     }
     if (!volunteerMode) return;
     setPendingStopCoords({ lat, lng });
-    setNewStopName('');
+    setNewStopName(pendingStopNameHint);
+    setPendingStopNameHint('');
     setNewStopImages([]);
     setAddStopSuccess(false);
     setShowAddStopModal(true);
-  }, [volunteerMode, pickingUpdateLocation]);
+  }, [volunteerMode, pickingUpdateLocation, pendingStopNameHint]);
 
   // Called by MapComponent when a nearby-stop dot is double-tapped -
   // pre-fills the "start" field with that stop's name and opens the
@@ -1950,7 +2417,6 @@ const GhanaTrotroTransit = () => {
     setActiveInput('start');
     setSuggestions([]);
     setBottomSheetContent('search');
-    setShowBottomSheet(true);
   }, []);
 
   const closeUpdateStopModal = useCallback(() => {
@@ -2707,16 +3173,8 @@ const GhanaTrotroTransit = () => {
           const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
           const firstStop = sortedStops[0];
           const lastStop = sortedStops[sortedStops.length - 1];
-          
-          const firstStopName = firstStop.stops.name.toLowerCase();
-          const lastStopName = lastStop.stops.name.toLowerCase();
-          const userStart = startPoint.toLowerCase();
-          const userDest = destination.toLowerCase();
-          
-          const startMatches = firstStopName.includes(userStart) || userStart.includes(firstStopName);
-          const destMatches = lastStopName.includes(userDest) || userDest.includes(lastStopName);
-          
-          return startMatches && destMatches;
+
+          return routeEndpointsMatchQuery(firstStop.stops.name, lastStop.stops.name, startPoint, destination);
         });
 
         // Format routes (handles composite routes)
@@ -2824,16 +3282,8 @@ const GhanaTrotroTransit = () => {
         const sortedStops = route.route_stops.sort((a, b) => a.stop_order - b.stop_order);
         const firstStop = sortedStops[0];
         const lastStop = sortedStops[sortedStops.length - 1];
-        
-        const firstStopName = firstStop.stops.name.toLowerCase();
-        const lastStopName = lastStop.stops.name.toLowerCase();
-        const userStart = searchStart.toLowerCase();
-        const userDest = searchDest.toLowerCase();
-        
-        const startMatches = firstStopName.includes(userStart) || userStart.includes(firstStopName);
-        const destMatches = lastStopName.includes(userDest) || userDest.includes(lastStopName);
-        
-        return startMatches && destMatches;
+
+        return routeEndpointsMatchQuery(firstStop.stops.name, lastStop.stops.name, searchStart, searchDest);
       });
 
       console.log('Matching routes found:', matchingRoutes.length);
@@ -2859,7 +3309,6 @@ const GhanaTrotroTransit = () => {
       await fetchRouteInfo(firstRoute.id);
       
       setBottomSheetContent('route');
-      setShowBottomSheet(true);
       setLastUpdateTime(new Date());
       
     } catch (error) {
@@ -2930,11 +3379,35 @@ const GhanaTrotroTransit = () => {
     }
   }, []);
 
+  // Aggregate (start_point, destination) search counts across every user,
+  // via a Postgres function (get_search_history_popularity - see notes)
+  // rather than selecting raw search_history rows, since that table is
+  // normally scoped per-user by RLS and individual searches shouldn't be
+  // readable across accounts anyway - only the counts should be.
+  // Session-cached the same way fetchExploreRoutes is: fetched once, and
+  // re-fetched only on an explicit retry.
+  const fetchSearchPopularity = useCallback(async (force = false) => {
+    if (!force && popularityFetchedRef.current) return;
+    popularityFetchedRef.current = true;
+
+    try {
+      const { data, error } = await supabase.rpc('get_search_history_popularity');
+      if (error) throw error;
+      setSearchPopularity(data || []);
+    } catch (error) {
+      console.error('Error fetching search popularity:', error);
+      popularityFetchedRef.current = false; // allow a retry on next open
+      // Not fatal - popularRoutes below just falls back to fare ordering
+      // when there's no popularity data to rank by.
+    }
+  }, []);
+
   const openExploreDrawer = useCallback(() => {
     setShowExploreDrawer(true);
     setExploreActiveTab('popular');
     fetchExploreRoutes();
-  }, [fetchExploreRoutes]);
+    fetchSearchPopularity();
+  }, [fetchExploreRoutes, fetchSearchPopularity]);
 
   const closeExploreDrawer = useCallback(() => {
     setShowExploreDrawer(false);
@@ -2942,14 +3415,39 @@ const GhanaTrotroTransit = () => {
 
   const retryExploreRoutes = useCallback(() => {
     exploreFetchedRef.current = false;
+    popularityFetchedRef.current = false;
     fetchExploreRoutes(true);
-  }, [fetchExploreRoutes]);
+    fetchSearchPopularity(true);
+  }, [fetchExploreRoutes, fetchSearchPopularity]);
 
-  // Popular Routes - there's no live popularity metric in the schema yet,
-  // so this surfaces a stable, representative slice (cheapest-fare-first,
-  // the same ordering already used across the app) instead of a made-up
-  // ranking.
-  const popularRoutes = useMemo(() => exploreRoutes.slice(0, 8), [exploreRoutes]);
+  // Popular Routes - ranked by how many times a route's endpoints (or a
+  // superstring/substring of them, same loose match as live route search)
+  // show up in search history across all users. Routes with no matching
+  // searches yet sort to the back in the original cheapest-fare-first
+  // order, so this degrades gracefully to the old placeholder ordering
+  // when there's little or no search history yet. Used both by the Explore
+  // drawer's Popular tab and the destination bar's Popular Routes strip.
+  const popularRoutes = useMemo(() => {
+    if (exploreRoutes.length === 0) return [];
+
+    const scored = exploreRoutes.map((route, index) => {
+      const stops = route.stops || [];
+      const firstName = stops[0]?.name;
+      const lastName = stops[stops.length - 1]?.name;
+
+      const searchCount = searchPopularity.reduce((sum, row) => {
+        const matches = routeEndpointsMatchQuery(firstName, lastName, row.start_point, row.destination);
+        return matches ? sum + (row.search_count || 0) : sum;
+      }, 0);
+
+      return { route, searchCount, index };
+    });
+
+    return scored
+      .sort((a, b) => b.searchCount - a.searchCount || a.index - b.index)
+      .slice(0, 8)
+      .map(({ route, searchCount }) => ({ ...route, searchCount }));
+  }, [exploreRoutes, searchPopularity]);
 
   // Routes Around You - any fetched route with at least one stop inside
   // the same nearby-radius already used for the map's nearby-stop dots,
@@ -3022,7 +3520,6 @@ const GhanaTrotroTransit = () => {
       setSelectedRoute(formatted);
       setBottomSheetContent('route');
       setBottomSheetState('route-details');
-      setShowBottomSheet(true);
 
       await fetchRouteInfo(formatted.id);
       setLastUpdateTime(new Date());
@@ -3042,7 +3539,6 @@ const GhanaTrotroTransit = () => {
     setSelectedRoute(route);
     setBottomSheetContent('route');
     setBottomSheetState('route-details');
-    setShowBottomSheet(true);
     setShowExploreDrawer(false);
     await fetchRouteInfo(route.id);
   }, [fetchRouteInfo]);
@@ -3066,27 +3562,22 @@ const GhanaTrotroTransit = () => {
     setRoutes([]);
     setSelectedRoute(null);
     setSuggestions([]);
-    setShowBottomSheet(true);
     setBottomSheetContent('search');
     routesCacheRef.current = null;
   }, []);
 
+  // The sheet can never be dismissed - it always stays docked at the
+  // bottom. "Closing" whatever's showing now just collapses it back to its
+  // peek height, and if that content was the search form or a stop detail
+  // (rather than an actual route), drops back to the ambient destination
+  // content underneath it.
   const closeBottomSheet = useCallback(() => {
-    setShowBottomSheet(false);
+    setBottomSheetContent((prev) => (prev === 'route' ? 'route' : 'destination'));
     setBottomSheetState('route-details');
     setShowSwipeIndicator(true);
+    setSheetSnapIndex(0);
+    setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[0]);
   }, []);
-
-  const showRouteDetails = useCallback(() => {
-    if (selectedRoute) {
-      setBottomSheetState('route-details');
-      setShowBottomSheet(true);
-      setShowSwipeIndicator(true);
-    } else {
-      setBottomSheetContent('search');
-      setShowBottomSheet(true);
-    }
-  }, [selectedRoute]);
 
   // Opens the currently-found route in Google Maps as a directions link -
   // first/last stop become origin/destination, everything in between is
@@ -3203,67 +3694,359 @@ const GhanaTrotroTransit = () => {
   };
 
   // ── Sheet vertical drag handlers ─────────────────────────────────────────
+  // The one persistent bottom sheet's drag/snap system, shared by every
+  // content type it can show. Uses Pointer Capture rather than window-level
+  // mousemove/touchmove listeners: the map underneath is a same-page
+  // iframe, and a plain window listener stops receiving move events
+  // entirely once the pointer crosses over an iframe's bounds (a
+  // well-known browser quirk) - since the sheet is never covered by a dark
+  // overlay, the map really is right there underneath it. Capturing the
+  // pointer on the handle keeps routing every subsequent move/up event
+  // straight to it regardless of what's underneath. The sheet can never be
+  // dismissed, so there's no dismiss threshold - a drag just always settles
+  // on whichever of the three resting heights it ends closest to.
   const handleSheetHandlePointerDown = useCallback((e) => {
     e.stopPropagation();
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
     sheetDragRef.current = {
       ...sheetDragRef.current,
       active: true,
-      startY: clientY,
+      startY: e.clientY,
       startH: sheetDragHeight,
       currentH: sheetDragHeight,
     };
     setSheetIsDragging(true);
   }, [sheetDragHeight]);
 
+  const handleSheetHandlePointerMove = useCallback((e) => {
+    const d = sheetDragRef.current;
+    if (!d.active) return;
+    const snaps = d.snapHeights || SNAP_HEIGHTS;
+    const deltaVh = ((d.startY - e.clientY) / window.innerHeight) * 100;
+    const newH = Math.min(snaps[snaps.length - 1] + 4, Math.max(6, d.startH + deltaVh));
+    d.currentH = newH;
+    setSheetDragHeight(newH);
+  }, []);
+
+  const handleSheetHandlePointerUp = useCallback((e) => {
+    const d = sheetDragRef.current;
+    if (!d.active) return;
+    d.active = false;
+    const h = d.currentH;
+    const snaps = d.snapHeights || SNAP_HEIGHTS;
+    const nearestIdx = snaps.reduce(
+      (closestIdx, point, idx) => (Math.abs(h - point) < Math.abs(h - snaps[closestIdx]) ? idx : closestIdx),
+      0
+    );
+    setSheetDragHeight(snaps[nearestIdx]);
+    setSheetSnapIndex(nearestIdx);
+    setSheetIsDragging(false);
+
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+  }, []);
+
+  // Pulls the sheet back up to its half snap. Used by the stop detail's
+  // summary row, which is the only thing still on screen once the sheet is
+  // dragged all the way down - tapping the stop's name there should bring
+  // its photos/nearby stops (and the search field) back without having to
+  // grab the drag handle.
+  const expandSheetFromPeek = useCallback(() => {
+    const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
+    setSheetSnapIndex(1);
+    setSheetDragHeight(snaps[1]);
+  }, []);
+
+  // Lazily loads Popular Routes / Stops Near You data (same source as the
+  // Explore drawer) the first time the sheet is dragged open past its peek
+  // height, regardless of which content is showing.
   useEffect(() => {
-    if (!sheetIsDragging) return;
+    if (isSheetExpanded) {
+      fetchExploreRoutes();
+      fetchSearchPopularity();
+    }
+  }, [isSheetExpanded, fetchExploreRoutes, fetchSearchPopularity]);
 
-    const onMove = (e) => {
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      const d = sheetDragRef.current;
-      const deltaVh = ((d.startY - clientY) / window.innerHeight) * 100;
-      // Let the sheet be dragged all the way down so the user can feel it
-      // collapsing toward the dismiss threshold, rather than hard-stopping at 20vh.
-      const newH = Math.min(92, Math.max(4, d.startH + deltaVh));
-      d.currentH = newH;
-      setSheetDragHeight(newH);
-    };
+  // Opens the stop detail view (images, name+distance, nearby stops,
+  // Directions button) for a stop picked via the destination bar - search
+  // button, a suggestion, or a Stops Near You card. Suggestion objects come
+  // straight from the `stops` table (raw `latitude`/`longitude` columns)
+  // while nearby-card stops are already normalized to `lat`/`lng` - this
+  // normalizes either shape so distance math downstream always has numbers
+  // to work with.
+  const openStopDetail = useCallback(async (rawStop) => {
+    if (!rawStop) return;
+    const lat = typeof rawStop.lat === 'number' ? rawStop.lat : parseFloat(rawStop.latitude);
+    const lng = typeof rawStop.lng === 'number' ? rawStop.lng : parseFloat(rawStop.longitude);
+    const stop = { ...rawStop, lat, lng };
 
-    const onUp = () => {
-      const h = sheetDragRef.current.currentH;
+    // Move the map to this stop and drop a highlight pin on it - covers all
+    // the ways a stop gets opened from the destination bar (typed search,
+    // a suggestion, or a Stops Near You card), since they all funnel through
+    // here.
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+      setHighlightedStop({ id: stop.id ?? null, lat, lng, name: stop.name });
+    }
 
-      if (h <= 20) {
-        // Dragged down to (or past) the dismiss threshold - close the sheet
-        closeBottomSheet();
-        setSheetIsDragging(false);
-        return;
+    setSelectedStopDetail(stop);
+    setStopDetailImages([]);
+    setStopDetailImagesLoading(true);
+    setStopImageLightboxIndex(null);
+    setBottomSheetContent('stop-detail');
+
+    // Feeds the shared nearbyStops pool (cache-first) so the "stops within
+    // 1km" section below has something to filter, even if this stop is far
+    // from the user's own location.
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+      fetchNearbyStops({ lat, lng });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('stop_images')
+        .select('*')
+        .eq('stop_id', stop.id)
+        .eq('approved', true);
+      if (!error && data) {
+        setStopDetailImages(data);
+      }
+    } catch (err) {
+      console.error('Error fetching stop images:', err);
+    } finally {
+      setStopDetailImagesLoading(false);
+    }
+  }, [fetchNearbyStops]);
+
+  const closeStopDetail = useCallback(() => {
+    setSelectedStopDetail(null);
+    setStopDetailImages([]);
+    setStopImageLightboxIndex(null);
+    setHighlightedStop(null);
+    setBottomSheetContent('destination');
+    setSheetSnapIndex(0);
+    setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[0]);
+  }, []);
+
+  // Opens the search-results list (see StopResultCard / renderStopSearch
+  // ResultsContent) for up to 7 stops whose name matched what was typed in
+  // the destination bar. Same coordinate normalization as openStopDetail,
+  // since these come from the same `stops` table / SAMPLE_STOPS shapes.
+  // Highlights + flies the map to the best (first) match only - the pulsing
+  // dot is a single-stop affordance, not one this list needs per-row.
+  const openStopSearchResults = useCallback((rawStops) => {
+    const normalized = rawStops.slice(0, 7).map((rawStop) => {
+      const lat = typeof rawStop.lat === 'number' ? rawStop.lat : parseFloat(rawStop.latitude);
+      const lng = typeof rawStop.lng === 'number' ? rawStop.lng : parseFloat(rawStop.longitude);
+      return { ...rawStop, lat, lng };
+    });
+
+    setSelectedStopDetail(null);
+    setStopDetailImages([]);
+    setStopImageLightboxIndex(null);
+    setStopSearchResults(normalized);
+    setResultLightbox(null);
+    setBottomSheetContent('stop-search-results');
+
+    // Seeds the shared nearbyStops pool around every result (not just the
+    // first) so each card's own "Stops nearby" section has something to
+    // filter, same as openStopDetail does for the single-stop view.
+    normalized.forEach((s) => {
+      if (!Number.isNaN(s.lat) && !Number.isNaN(s.lng)) {
+        fetchNearbyStops({ lat: s.lat, lng: s.lng });
+      }
+    });
+
+    const best = normalized[0];
+    if (best && !Number.isNaN(best.lat) && !Number.isNaN(best.lng)) {
+      setHighlightedStop({ id: best.id ?? null, lat: best.lat, lng: best.lng, name: best.name });
+    }
+  }, [fetchNearbyStops]);
+
+  const closeStopSearchResults = useCallback(() => {
+    setStopSearchResults([]);
+    setResultLightbox(null);
+    setHighlightedStop(null);
+    setBottomSheetContent('destination');
+    setSheetSnapIndex(0);
+    setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[0]);
+  }, []);
+
+  // Tap-to-preview for a stop's photos - opens a full-size lightbox over
+  // the image that was tapped, with left/right paging between that same
+  // stop's other approved photos.
+  const openStopImageLightbox = useCallback((index) => {
+    setStopImageLightboxIndex(index);
+  }, []);
+
+  const closeStopImageLightbox = useCallback(() => {
+    setStopImageLightboxIndex(null);
+  }, []);
+
+  const showNextStopImage = useCallback((e) => {
+    e.stopPropagation();
+    setStopImageLightboxIndex((i) => (i === null || stopDetailImages.length === 0 ? i : (i + 1) % stopDetailImages.length));
+  }, [stopDetailImages.length]);
+
+  const showPrevStopImage = useCallback((e) => {
+    e.stopPropagation();
+    setStopImageLightboxIndex((i) => (i === null || stopDetailImages.length === 0 ? i : (i - 1 + stopDetailImages.length) % stopDetailImages.length));
+  }, [stopDetailImages.length]);
+
+  // Same tap-to-preview, generalized for the search-results list - shared
+  // across every StopResultCard since only one photo preview can be open at
+  // a time regardless of which card's photo strip it came from.
+  const openResultLightbox = useCallback((images, name, index) => {
+    setResultLightbox({ images, name, index });
+  }, []);
+
+  const closeResultLightbox = useCallback(() => {
+    setResultLightbox(null);
+  }, []);
+
+  const showNextResultImage = useCallback((e) => {
+    e.stopPropagation();
+    setResultLightbox((cur) => (cur ? { ...cur, index: (cur.index + 1) % cur.images.length } : cur));
+  }, []);
+
+  const showPrevResultImage = useCallback((e) => {
+    e.stopPropagation();
+    setResultLightbox((cur) => (cur ? { ...cur, index: (cur.index - 1 + cur.images.length) % cur.images.length } : cur));
+  }, []);
+
+  // Distance from the user's current location to the stop being viewed.
+  const stopDetailDistance = useMemo(() => {
+    if (!selectedStopDetail || !userLocation) return null;
+    if (typeof selectedStopDetail.lat !== 'number' || Number.isNaN(selectedStopDetail.lat)) return null;
+    return haversineKm(userLocation.lat, userLocation.lng, selectedStopDetail.lat, selectedStopDetail.lng);
+  }, [selectedStopDetail, userLocation]);
+
+  // Other known stops within 1km of the stop being viewed (not the user's
+  // location) - drawn from the shared nearbyStops pool, which openStopDetail
+  // seeds for whatever area this stop is in.
+  const stopDetailNearby = useMemo(() => {
+    if (!selectedStopDetail || typeof selectedStopDetail.lat !== 'number' || Number.isNaN(selectedStopDetail.lat)) {
+      return [];
+    }
+    return nearbyStops
+      .filter((s) => s.id !== selectedStopDetail.id)
+      .map((s) => ({ stop: s, distance: haversineKm(selectedStopDetail.lat, selectedStopDetail.lng, s.lat, s.lng) }))
+      .filter(({ distance }) => distance <= 1)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10);
+  }, [selectedStopDetail, nearbyStops]);
+
+  // Directions - hands off from a stop detail view into the full
+  // start/destination form, exactly like the original search flow: the
+  // destination is already set, the start field just needs filling in.
+  // Takes an explicit stop so it works both from the single-stop view
+  // (handleStopDetailDirections below) and from any card in the
+  // search-results list.
+  const handleStopDetailDirectionsFor = useCallback((stop) => {
+    if (!stop) return;
+    setDestination(stop.name);
+    setSuggestions([]);
+    setSelectedStopDetail(null);
+    setStopDetailImages([]);
+    setStopImageLightboxIndex(null);
+    setStopSearchResults([]);
+    setResultLightbox(null);
+    setHighlightedStop(null);
+    setBottomSheetContent('search');
+  }, []);
+
+  const handleStopDetailDirections = useCallback(() => {
+    handleStopDetailDirectionsFor(selectedStopDetail);
+  }, [selectedStopDetail, handleStopDetailDirectionsFor]);
+
+  // Destination content's own search button (also used by the search row
+  // inside stop detail and the search-results list) - looks up every stop
+  // whose name matches what was typed (up to 7) and shows them all as a
+  // list, each with the same layout as the single stop detail view
+  // (StopResultCard). The destination bar's job is finding a stop, not
+  // collecting a full start/destination route, so it no longer drops into
+  // that form when there's no match (that form is still reached
+  // separately, via a stop's own Directions button).
+  //
+  // Request guard: destBarSearchInFlightRef blocks a second press while one
+  // is already running, and lastDestBarSearchAtRef enforces a minimum gap
+  // between presses (double-tap / held-down Enter). destBarSearchCacheRef
+  // caches results per query for DEST_BAR_SEARCH_CACHE_TTL_MS, so repeating
+  // the same search doesn't cost a second round trip. It's kept separate
+  // from fetchSuggestions' getCachedStopSearch cache because this looks up
+  // more results per query (7 vs. 5) - sharing one cache between the two
+  // could hand this view back a suggestions-sized (5-item) list.
+  const destBarSearchInFlightRef = useRef(false);
+  const lastDestBarSearchAtRef = useRef(0);
+  const destBarSearchCacheRef = useRef(new Map()); // query (lowercased) -> { data, at }
+  const handleDestBarSearch = useCallback(async () => {
+    const query = destination.trim();
+    if (!query) return;
+
+    const now = Date.now();
+    if (destBarSearchInFlightRef.current) return;
+    if (now - lastDestBarSearchAtRef.current < DEST_BAR_SEARCH_MIN_INTERVAL_MS) return;
+    lastDestBarSearchAtRef.current = now;
+
+    setSuggestions([]);
+
+    const cacheKey = query.toLowerCase();
+    const cached = destBarSearchCacheRef.current.get(cacheKey);
+    let matches;
+
+    if (cached && (now - cached.at) < DEST_BAR_SEARCH_CACHE_TTL_MS) {
+      matches = cached.data;
+    } else {
+      destBarSearchInFlightRef.current = true;
+      matches = [];
+      try {
+        const { data, error } = await supabase
+          .from('stops')
+          .select('*')
+          .eq('approved', true)
+          .eq('user_location_to_create', false)
+          .ilike('name', `%${query}%`)
+          .limit(7);
+
+        if (!error && data) {
+          matches = data;
+        }
+      } catch (error) {
+        console.error('Error searching for stops:', error);
+      } finally {
+        destBarSearchInFlightRef.current = false;
       }
 
-      // Otherwise: free snap - the sheet just stays wherever the user left it
-      setSheetDragHeight(h);
-      setSheetIsDragging(false);
-    };
+      // Same sample-stop fallback fetchSuggestions uses when Supabase is
+      // unreachable or turns up nothing.
+      if (matches.length === 0) {
+        matches = SAMPLE_STOPS
+          .filter((stop) => stop.name.toLowerCase().includes(query.toLowerCase()))
+          .slice(0, 7);
+      }
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, [sheetIsDragging, closeBottomSheet]);
-
-  // Reset sheet to mid snap when bottom sheet opens
-  useEffect(() => {
-    if (showBottomSheet) {
-      setSheetSnapIndex(1);
-      setSheetDragHeight(SNAP_HEIGHTS[1]);
+      destBarSearchCacheRef.current.set(cacheKey, { data: matches, at: now });
     }
-  }, [showBottomSheet]);
+
+    if (matches.length === 0) {
+      setStopNotFoundQuery(query);
+      setShowStopNotFoundModal(true);
+      return;
+    }
+
+    openStopSearchResults(matches);
+  }, [destination, openStopSearchResults]);
+
+  // Jump to the sheet's half-height snap whenever it switches to content the
+  // user needs to actually read - the search form, a stop detail, or the
+  // search-results list. Route content is handled by its own dynamic-height
+  // effect above (it needs the computed per-route "full" snap, not the
+  // generic default); closing something back down to the ambient
+  // destination content explicitly collapses to peek itself (see
+  // closeBottomSheet/closeStopDetail/closeStopSearchResults).
+  useEffect(() => {
+    if (bottomSheetContent !== 'search' && bottomSheetContent !== 'stop-detail' && bottomSheetContent !== 'stop-search-results') return;
+    setSheetSnapIndex(1);
+    setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
+  }, [bottomSheetContent]);
 
   // Auto-hide swipe indicator after 5 seconds
   useEffect(() => {
@@ -3272,8 +4055,9 @@ const GhanaTrotroTransit = () => {
     return () => clearTimeout(timer);
   }, [showSwipeIndicator]);
 
-  // Check if any modal or bottom sheet is open
-  const isAnyModalOpen = showBottomSheet || showProfileModal || showInfoModal || showSearchHistoryModal || showCreatedRoutesModal || showRouteNotFoundModal || showExploreDrawer;
+  // Check if any modal is open (the sheet itself is always open now, so it's
+  // no longer part of this - see the buttons that used to dim for it)
+  const isAnyModalOpen = showProfileModal || showInfoModal || showSearchHistoryModal || showCreatedRoutesModal || showRouteNotFoundModal || showStopNotFoundModal || showNotificationsModal || showExploreDrawer;
 
   // Effects
   useEffect(() => {
@@ -3440,6 +4224,60 @@ const GhanaTrotroTransit = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Restore the active route after a refresh ─────────────────────────────
+  // Mirrors the shared-link restore above, but sourced from localStorage
+  // (see the persist effect right below) instead of the URL, and skips the
+  // native-app hand-off entirely - this is the user's own device resuming
+  // its own session, not opening a link from someone else. Only runs when
+  // the page wasn't already opened via a share link - the effect above
+  // already handles restoring the route in that case. Runs once on mount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('id') || (params.get('from') && params.get('to'))) return;
+    if (!cookiesAccepted) return;
+
+    let saved;
+    try {
+      const raw = localStorage.getItem('gtt_activeRoute');
+      saved = raw ? JSON.parse(raw) : null;
+    } catch {
+      saved = null;
+    }
+    if (!saved?.routeId) return;
+
+    fetchRouteById(saved.routeId).then((route) => {
+      if (!route && saved.startPoint && saved.destination) {
+        // The route may have since been removed from the database -
+        // fall back to a normal search on the same start/destination so
+        // the user at least lands somewhere close to where they left off.
+        setStartPoint(saved.startPoint);
+        setDestination(saved.destination);
+        findRoutes(saved.startPoint, saved.destination);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Persist the active route across refreshes ────────────────────────────
+  // Whenever a route becomes (or stops being) the current selection, mirror
+  // it to localStorage so the restore effect above can bring it straight
+  // back after a page refresh, instead of dropping the user back to a blank
+  // search. Gated on cookie consent, same as search history/location.
+  useEffect(() => {
+    if (!cookiesAccepted) return;
+    try {
+      if (selectedRoute?.id) {
+        localStorage.setItem('gtt_activeRoute', JSON.stringify({
+          routeId: selectedRoute.id,
+          startPoint,
+          destination,
+        }));
+      } else {
+        localStorage.removeItem('gtt_activeRoute');
+      }
+    } catch { /* best-effort - a failed write here shouldn't block anything */ }
+  }, [cookiesAccepted, selectedRoute, startPoint, destination]);
+
 
 
   // When app regains focus or becomes visible again, ensure we reconnect
@@ -3523,31 +4361,23 @@ const GhanaTrotroTransit = () => {
 
     return (
     <div className="search-section">
-      <div className="scroll-view">
-        <div className="sheet-header">
-          <div className="header-content">
-            <h1 className="app-title">Ghana Trotro Transit</h1>
-            <p className="app-subtitle">Find your perfect trotro route</p>
-          </div>
-          <div className="header-actions">
-            <button 
-              className="close-button"
-              onClick={closeBottomSheet}
-            >
-              <X size={18} strokeWidth={2.5} />
+      <div className="search-form-topbar">
+          <button
+            className="search-back-button"
+            onClick={closeBottomSheet}
+            aria-label="Back"
+            title="Back"
+          >
+            <ChevronLeft size={20} strokeWidth={2.5} />
             </button>
-          </div>
+            <div className="search-form-title">Looking for routes?</div>
         </div>
-        
-        {user && showWelcomeBanner && (
-          <div className="welcome-banner">
-            <span className="welcome-text">
-              Welcome back, {userProfile?.first_name || user.email?.split('@')[0]}! 👋
-            </span>
-          </div>
-        )}
+      <div className="scroll-view">
+        {/* Slim in place of the old title/subtitle header - just enough
+            to get back to the ambient destination view, so the search
+            card (and its start input) sits right at the top and is what
+            shows once the sheet is dragged back down to peek height. */}
 
-      
         <div className="search-card">
           <div className="input-row">
             <div className="input-container input-container-start">
@@ -3702,30 +4532,10 @@ const GhanaTrotroTransit = () => {
             )}
           </div>
         )}
-        
-        {!user && (
-          <div className="quick-auth-section">
-            <span className="quick-auth-text">Don't have an account?</span>
-            <button 
-              className="quick-auth-button"
-              onClick={() => setShowProfileModal(true)}
-            >
-              Sign Up Free
-            </button>
-            <button
-              className="quick-auth-info-button"
-              onClick={() => setShowInfoModal(true)}
-              title="Why create an account?"
-              aria-label="Why create an account?"
-            >
-              <Info size={16} color={COLORS.primary} />
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
-  }, [user, startPoint, destination, suggestions, activeInput, showWelcomeBanner, userProfile, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory, showRecentSearches, toggleRecentSearches]);
+  }, [startPoint, destination, suggestions, activeInput, isRealtimeConnected, lastUpdateTime, fetchSuggestions, swapLocations, findRoutes, closeBottomSheet, ensureConnected, searchHistory, showRecentSearches, toggleRecentSearches]);
 
   // Render route details with realtime indicator
   const renderRouteDetails = useCallback(() => (
@@ -3767,7 +4577,7 @@ const GhanaTrotroTransit = () => {
           <div className="route-summary-cards">
             <div className="summary-card">
               <div className="summary-icon">
-                <Map size={20} color={COLORS.primary} />
+                <MapIcon size={20} color={COLORS.primary} />
               </div>
               <div className="summary-content">
                 <span className="summary-label">Total Distance</span>
@@ -4216,7 +5026,540 @@ const GhanaTrotroTransit = () => {
     </div>
   ), [selectedRoute, routeInfoData, closeBottomSheet, isRealtimeConnected, lastUpdateTime]);
 
+  // ── Destination content (ambient idle view) ───────────────────────────────
+  // The old standalone "destination bar" is now just one of the things this
+  // shared sheet can show: its input/search row, plus everything that used
+  // to scroll beneath it (Recent Searches, suggestions, Popular Routes /
+  // Stops Near You, quick actions).
+  const renderDestinationContent = useCallback(() => (
+    <div className="destination-bar-content">
+      <div className="quick-search-row">
+        <div className="input-container">
+          <div className="input-icon">
+            <MapPin size={20} color={COLORS.primary} />
+          </div>
+          <input
+            className="input"
+            placeholder="trotro station, bus stop, junction..."
+            value={destination}
+            onChange={(e) => {
+              setDestination(e.target.value);
+              setActiveInput('destination');
+              ensureConnected();
+              fetchSuggestions(e.target.value, 'destination');
+            }}
+            onFocus={() => {
+              setActiveInput('destination');
+              ensureConnected();
+              // Tapping into the field is treated the same as dragging the
+              // handle all the way up - it extends the sheet to full
+              // height so there's room for suggestions/browse content
+              // beneath the keyboard.
+              setSheetSnapIndex(2);
+              setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleDestBarSearch();
+            }}
+          />
+          {destination ? (
+            <button
+              className="input-clear-btn"
+              onClick={() => { setDestination(''); setSuggestions([]); }}
+              tabIndex={-1}
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+
+        {destination.trim() ? (
+          <button
+            className="quick-search-button"
+            onClick={handleDestBarSearch}
+            aria-label="Search"
+            title="Search"
+          >
+            <Search size={20} color="#FFFFFF" />
+          </button>
+        ) : null}
+      </div>
+
+      {/* Everything below the input row scrolls independently of it - the
+          input (and search button) stay pinned at the top no matter how
+          far down Recent Searches / Popular Routes / Stops Near You /
+          actions have been scrolled. */}
+      <div className="destination-bar-scroll">
+        {/* Suggestions matching what's typed always take priority over
+            Recent Searches, which sits just below them. */}
+        {suggestions.length > 0 && (
+          <div className="suggestions-container destination-bar-suggestions">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.id}
+                className="suggestion-item"
+                onClick={() => {
+                  setDestination(suggestion.name);
+                  setSuggestions([]);
+                  openStopDetail(suggestion);
+                }}
+              >
+                <MapPin size={16} color={COLORS.primary} />
+                <span className="suggestion-text">{suggestion.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {searchHistory.length > 0 && (
+          <div className="destination-bar-section destination-bar-recent">
+            <span className="destination-bar-section-title">Recent Searches</span>
+            <div className="recent-searches-list">
+              {searchHistory.slice(0, 5).map((search) => (
+                <button
+                  key={search.id}
+                  className="recent-search-item"
+                  onClick={() => {
+                    setSuggestions([]);
+                    setStartPoint(search.start_point);
+                    setDestination(search.destination);
+                    findRoutes(search.start_point, search.destination);
+                  }}
+                >
+                  <div className="recent-search-icon">
+                    <History size={14} color={COLORS.primary} />
+                  </div>
+                  <div className="recent-search-body">
+                    <span className="recent-search-text">
+                      {search.start_point}
+                      <span className="recent-search-arrow"> → </span>
+                      {search.destination}
+                    </span>
+                    <span className="recent-search-date">
+                      {search.searched_at ? new Date(search.searched_at).toLocaleDateString() : 'Recent'}
+                    </span>
+                  </div>
+                  <ChevronRight size={16} color={COLORS.textLight} className="recent-search-chevron" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {suggestions.length === 0 && (
+          <div className="destination-bar-explore">
+            <div className="destination-bar-section">
+              <span className="destination-bar-section-title">Popular Routes</span>
+              <div className="destination-bar-hscroll">
+                {exploreLoading && popularRoutes.length === 0 ? (
+                  <p className="destination-bar-empty">Loading routes…</p>
+                ) : popularRoutes.length > 0 ? (
+                  popularRoutes.map((route) => (
+                    <button
+                      key={route.id}
+                      className="destination-bar-card"
+                      onClick={() => handleExploreRouteSelect(route)}
+                    >
+                      <div className="destination-bar-card-icon">
+                        <Bus size={18} color={COLORS.primary} />
+                      </div>
+                      <span className="destination-bar-card-name">{route.name}</span>
+                      <span className="destination-bar-card-sub">GH₵ {route.total_fare}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="destination-bar-empty">No routes available yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="destination-bar-section">
+              <span className="destination-bar-section-title">Stops Near You</span>
+              <div className="destination-bar-hscroll">
+                {!userLocation ? (
+                  <p className="destination-bar-empty">Turn on location to see stops near you.</p>
+                ) : locationsNearby.length > 0 ? (
+                  locationsNearby.map(({ stop, distance }) => (
+                    <button
+                      key={stop.id}
+                      className="destination-bar-card"
+                      onClick={() => openStopDetail(stop)}
+                    >
+                      <div className="destination-bar-card-icon">
+                        <MapPin size={18} color={COLORS.primary} />
+                      </div>
+                      <span className="destination-bar-card-name">{stop.name}</span>
+                      <span className="destination-bar-card-sub">
+                        {distance != null ? `${distance.toFixed(1)}km away` : 'Nearby'}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="destination-bar-empty">No stops found nearby yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Quick actions - always at the bottom, regardless of whether
+            suggestions or the browse view above are showing. Sign Up only
+            appears for guests; the other three reuse the exact same
+            handlers as their profile-menu equivalents. */}
+        <div className="destination-bar-actions">
+          {!user && (
+            <button
+              className="destination-bar-action-button destination-bar-action-button--primary"
+              onClick={() => setShowProfileModal(true)}
+            >
+              <LogIn size={15} />
+              <span>Sign Up</span>
+            </button>
+          )}
+
+          <button
+            className="destination-bar-action-button"
+            onClick={() => { setIsGeneralReport(true); setShowReportModal(true); }}
+          >
+            <Flag size={15} color={COLORS.primary} />
+            <span>Report an Issue</span>
+          </button>
+
+          <button
+            className="destination-bar-action-button"
+            onClick={() => { setDonateEmail(user?.email || ''); setShowDonateModal(true); }}
+          >
+            <Heart size={15} color={COLORS.primary} />
+            <span>Buy Me Waakye</span>
+          </button>
+
+          <button
+            className="destination-bar-action-button"
+            onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
+          >
+            <Download size={15} color={COLORS.primary} />
+            <span>Download</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  ), [destination, suggestions, searchHistory, popularRoutes, locationsNearby, exploreLoading, userLocation, user, ensureConnected, fetchSuggestions, handleDestBarSearch, findRoutes, openStopDetail, handleExploreRouteSelect]);
+
+  // ── Stop detail content ────────────────────────────────────────────────
+  // Shown after picking a stop from the destination content (search
+  // button, a suggestion, or a Stops Near You card). Directions hands off
+  // into the normal start/destination search flow.
+  const renderStopDetailContent = useCallback(() => {
+    if (!selectedStopDetail) return null;
+    return (
+      <>
+        {/* Search row - the same destination field the ambient destination
+            content uses, kept here so another stop can be looked up from
+            inside a stop's detail view without backing out to the
+            destination content first. Picking a suggestion just swaps which
+            stop this view is showing (openStopDetail). At peek height (see
+            .sheet-at-peek in HomeScreen.css) this becomes the whole sheet
+            instead of the summary row below - centered, via the
+            stop-detail-single-search-row override. */}
+        <div className="quick-search-row stop-detail-search-row stop-detail-single-search-row">
+          <button className="stop-detail-back-button" onClick={closeStopDetail} aria-label="Back">
+            <ArrowLeft size={18} />
+          </button>
+
+          <div className="input-container">
+            <div className="input-icon">
+              <Search size={18} color={COLORS.primary} />
+            </div>
+            <input
+              className="input"
+              placeholder="trotro station, bus stop, junction..."
+              value={destination}
+              onChange={(e) => {
+                setDestination(e.target.value);
+                setActiveInput('destination');
+                ensureConnected();
+                fetchSuggestions(e.target.value, 'destination');
+              }}
+              onFocus={() => {
+                setActiveInput('destination');
+                ensureConnected();
+                // Same as in the destination content: tapping the field
+                // pulls the sheet to full height so suggestions have room
+                // above the keyboard.
+                setSheetSnapIndex(2);
+                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleDestBarSearch();
+              }}
+            />
+            {destination ? (
+              <button
+                className="input-clear-btn"
+                onClick={() => { setDestination(''); setSuggestions([]); }}
+                tabIndex={-1}
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+
+          {destination.trim() ? (
+            <button
+              className="quick-search-button"
+              onClick={handleDestBarSearch}
+              aria-label="Search"
+              title="Search"
+            >
+              <Search size={20} color="#FFFFFF" />
+            </button>
+          ) : null}
+        </div>
+
+        {/* Summary row - name (+ distance) and Directions. Shown whenever the
+            sheet is expanded past peek; at peek height it's the search row
+            above that takes over instead (see stop-detail-single-summary-row
+            override in HomeScreen.css), so a fully-collapsed sheet reads as
+            "back + search + quick search" rather than the stop summary.
+            Tapping the name pulls the sheet back up. */}
+        <div className="stop-detail-summary-row stop-detail-single-summary-row">
+          <button
+            type="button"
+            className="stop-detail-summary-info"
+            onClick={expandSheetFromPeek}
+          >
+            <span className="stop-detail-summary-name">{selectedStopDetail.name}</span>
+            {stopDetailDistance != null && (
+              <span className="stop-detail-summary-distance">{stopDetailDistance.toFixed(1)}km away</span>
+            )}
+          </button>
+
+          <button
+            className="stop-detail-directions-button"
+            onClick={handleStopDetailDirections}
+            aria-label="Directions"
+            title="Directions"
+          >
+            <Navigation size={16} color="#FFFFFF" />
+            <span className="stop-detail-directions-label">Directions</span>
+          </button>
+        </div>
+
+        <div className="stop-detail-body">
+          {/* While there's something typed in the field above, the body
+              turns into the suggestion list - the stop's own photos and
+              nearby stops come back as soon as the query is cleared or a
+              suggestion is picked. */}
+          {suggestions.length > 0 ? (
+            <div className="suggestions-container destination-bar-suggestions">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  className="suggestion-item"
+                  onClick={() => {
+                    setDestination(suggestion.name);
+                    setSuggestions([]);
+                    openStopDetail(suggestion);
+                  }}
+                >
+                  <MapPin size={16} color={COLORS.primary} />
+                  <span className="suggestion-text">{suggestion.name}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="stop-detail-images">
+                {stopDetailImagesLoading ? (
+                  <div className="stop-detail-images-placeholder">
+                    <div className="loading-spinner"></div>
+                  </div>
+                ) : stopDetailImages.length > 0 ? (
+                  <div className="stop-detail-images-scroll">
+                    {stopDetailImages.map((img, index) => (
+                      <button
+                        key={img.id}
+                        type="button"
+                        className="stop-detail-image-button"
+                        onClick={() => openStopImageLightbox(index)}
+                        aria-label={`View photo ${index + 1} of ${stopDetailImages.length} for ${selectedStopDetail.name}`}
+                      >
+                        <img
+                          src={img.url}
+                          alt={selectedStopDetail.name}
+                          className="stop-detail-image"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="stop-detail-images-placeholder">
+                    <MapPin size={32} color={COLORS.primary} />
+                  </div>
+                )}
+              </div>
+
+              <div className="stop-detail-nearby">
+                <span className="destination-bar-section-title">Stops nearby</span>
+                <div className="destination-bar-hscroll">
+                  {stopDetailNearby.length > 0 ? (
+                    stopDetailNearby.map(({ stop, distance }) => (
+                      <button
+                        key={stop.id}
+                        className="destination-bar-card"
+                        onClick={() => openStopDetail(stop)}
+                      >
+                        <div className="destination-bar-card-icon">
+                          <MapPin size={18} color={COLORS.primary} />
+                        </div>
+                        <span className="destination-bar-card-name">{stop.name}</span>
+                        <span className="destination-bar-card-sub">{distance.toFixed(1)}km away</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="destination-bar-empty">No other stops nearby.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </>
+    );
+  }, [selectedStopDetail, stopDetailDistance, stopDetailImagesLoading, stopDetailImages, stopDetailNearby, closeStopDetail, handleStopDetailDirections, openStopImageLightbox, openStopDetail, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek]);
+
+  // ── Stop search-results content ────────────────────────────────────────
+  // Shown after running a destination-bar search that turns up more than
+  // just a single obvious match - up to 7 stops whose name matched what was
+  // typed, each laid out exactly like the single stop detail view above
+  // (StopResultCard reuses the same stop-detail-* classes) so browsing a
+  // list of possibilities feels the same as looking at one stop.
+  const renderStopSearchResultsContent = useCallback(() => {
+    if (stopSearchResults.length === 0) return null;
+    return (
+      <>
+        {/* Same search row as the single stop detail view - typing here and
+            searching again just replaces this list with a fresh one. At peek
+            height this becomes the whole sheet instead of the count bar
+            below (see stop-detail-single-search-row override in
+            HomeScreen.css), same swap as the single stop detail view. */}
+        <div className="quick-search-row stop-detail-search-row stop-detail-single-search-row">
+          <button className="stop-detail-back-button" onClick={closeStopSearchResults} aria-label="Back">
+            <ArrowLeft size={18} />
+          </button>
+
+          <div className="input-container">
+            <div className="input-icon">
+              <Search size={18} color={COLORS.primary} />
+            </div>
+            <input
+              className="input"
+              placeholder="trotro station, bus stop, junction..."
+              value={destination}
+              onChange={(e) => {
+                setDestination(e.target.value);
+                setActiveInput('destination');
+                ensureConnected();
+                fetchSuggestions(e.target.value, 'destination');
+              }}
+              onFocus={() => {
+                setActiveInput('destination');
+                ensureConnected();
+                setSheetSnapIndex(2);
+                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleDestBarSearch();
+              }}
+            />
+            {destination ? (
+              <button
+                className="input-clear-btn"
+                onClick={() => { setDestination(''); setSuggestions([]); }}
+                tabIndex={-1}
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+
+          {destination.trim() ? (
+            <button
+              className="quick-search-button"
+              onClick={handleDestBarSearch}
+              aria-label="Search"
+              title="Search"
+            >
+              <Search size={20} color="#FFFFFF" />
+            </button>
+          ) : null}
+        </div>
+
+        {/* Count bar - "N stops found for ...". Shown whenever the sheet is
+            expanded past peek; at peek height it's the search row above
+            that takes over instead (see stop-detail-single-summary-row
+            override in HomeScreen.css), so a fully-collapsed sheet reads as
+            "back + search + quick search" rather than the count. */}
+        <div className="stop-detail-summary-row stop-detail-single-summary-row">
+          <button
+            type="button"
+            className="stop-detail-summary-info"
+            onClick={expandSheetFromPeek}
+          >
+            <span className="stop-detail-summary-distance">
+              {stopSearchResults.length} stop{stopSearchResults.length !== 1 ? 's' : ''} found for &quot;{destination}&quot;
+            </span>
+          </button>
+        </div>
+
+        <div className="stop-detail-body">
+          {suggestions.length > 0 ? (
+            <div className="suggestions-container destination-bar-suggestions">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  className="suggestion-item"
+                  onClick={() => {
+                    setDestination(suggestion.name);
+                    setSuggestions([]);
+                    openStopDetail(suggestion);
+                  }}
+                >
+                  <MapPin size={16} color={COLORS.primary} />
+                  <span className="suggestion-text">{suggestion.name}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="stop-search-results-list">
+              {stopSearchResults.map((stop, index) => (
+                <StopResultCard
+                  key={stop.id ?? index}
+                  stop={stop}
+                  userLocation={userLocation}
+                  nearbyStops={nearbyStops}
+                  onDirections={handleStopDetailDirectionsFor}
+                  onSelectNearbyStop={openStopDetail}
+                  onOpenLightbox={openResultLightbox}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }, [stopSearchResults, closeStopSearchResults, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek, userLocation, nearbyStops, handleStopDetailDirectionsFor, openStopDetail, openResultLightbox]);
+
   const renderBottomSheetContent = useCallback(() => {
+    if (bottomSheetContent === 'destination') {
+      return renderDestinationContent();
+    }
+    if (bottomSheetContent === 'stop-detail') {
+      return renderStopDetailContent();
+    }
+    if (bottomSheetContent === 'stop-search-results') {
+      return renderStopSearchResultsContent();
+    }
     if (bottomSheetContent === 'search') {
       return renderSearchForm();
     }
@@ -4248,7 +5591,7 @@ const GhanaTrotroTransit = () => {
           : renderRouteInfo()}
       </div>
     );
-  }, [bottomSheetContent, bottomSheetState, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
+  }, [bottomSheetContent, bottomSheetState, renderDestinationContent, renderStopDetailContent, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
 
   // ── Cookie consent required screen ──────────────────────────────────
   // Cookies cannot be declined - if the user chooses not to accept,
@@ -4296,7 +5639,12 @@ const GhanaTrotroTransit = () => {
         onMapTap={handleMapTap}
         recenterUserTrigger={recenterUserTrigger}
         recenterRouteTrigger={recenterRouteTrigger}
+        resetBearingTrigger={resetBearingTrigger}
+        toggleLayerTrigger={toggleLayerTrigger}
+        toggle3DTrigger={toggle3DTrigger}
+        onBearingChange={setMapBearing}
         onPhotoLightboxChange={setIsPhotoLightboxOpen}
+        highlightedStop={highlightedStop}
       />
 
       <SeoContent />
@@ -4372,58 +5720,6 @@ const GhanaTrotroTransit = () => {
           >
             <svg fill="var(--primary-color)" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
           </button>
-
-          {/* Stacked bottom-right action buttons. These sit in a single flex
-              column so that whichever ones are conditionally hidden (Google
-              Maps, Locate Me, Recenter Route) never leave a gap behind them -
-              the remaining buttons simply close the space. Rendered in
-              bottom-to-top DOM order since the container is column-reverse. */}
-          <div className="map-action-stack">
-            {/* Info Button with conditional opacity */}
-            <button className={`info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)}>
-              <Info size={20} color="#FFFFFF" />
-            </button>
-
-            {/* Locate Me - only shown when we have a location fix AND that dot
-                isn't currently visible on screen; tapping it pans/zooms the map
-                back to it rather than re-requesting permission. */}
-            {userLocation && !isUserLocationVisible && (
-              <button
-                className="locate-button"
-                onClick={() => setRecenterUserTrigger((t) => t + 1)}
-                aria-label="Show my location"
-              >
-                <Navigation size={20} color="#FFFFFF" />
-              </button>
-            )}
-
-            {/* Open in Google Maps - only once a route has actually been found;
-                opens the same stop sequence as turn-by-turn directions. */}
-            {selectedRoute && (
-              <button
-                className="google-maps-button"
-                onClick={openRouteInGoogleMaps}
-                aria-label="Open route in Google Maps"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="100" height="100" viewBox="0 0 64 64">
-<path fill="#48b564" d="M35.76,26.36h0.01c0,0-3.77,5.53-6.94,9.64c-2.74,3.55-3.54,6.59-3.77,8.06	C24.97,44.6,24.53,45,24,45s-0.97-0.4-1.06-0.94c-0.23-1.47-1.03-4.51-3.77-8.06c-0.42-0.55-0.85-1.12-1.28-1.7L28.24,22l8.33-9.88	C37.49,14.05,38,16.21,38,18.5C38,21.4,37.17,24.09,35.76,26.36z"></path><path fill="#fcc60e" d="M28.24,22L17.89,34.3c-2.82-3.78-5.66-7.94-5.66-7.94h0.01c-0.3-0.48-0.57-0.97-0.8-1.48L19.76,15	c-0.79,0.95-1.26,2.17-1.26,3.5c0,3.04,2.46,5.5,5.5,5.5C25.71,24,27.24,23.22,28.24,22z"></path><path fill="#2c85eb" d="M28.4,4.74l-8.57,10.18L13.27,9.2C15.83,6.02,19.69,4,24,4C25.54,4,27.02,4.26,28.4,4.74z"></path><path fill="#ed5748" d="M19.83,14.92L19.76,15l-8.32,9.88C10.52,22.95,10,20.79,10,18.5c0-3.54,1.23-6.79,3.27-9.3	L19.83,14.92z"></path><path fill="#5695f6" d="M28.24,22c0.79-0.95,1.26-2.17,1.26-3.5c0-3.04-2.46-5.5-5.5-5.5c-1.71,0-3.24,0.78-4.24,2L28.4,4.74	c3.59,1.22,6.53,3.91,8.17,7.38L28.24,22z"></path>
-</svg>
-              </button>
-            )}
-
-            {/* Recenter Route - only shown once a route is selected AND some
-                part of it has been panned off-screen; tapping it flies the map
-                back to fit the whole route, same as the initial auto-fit. */}
-            {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
-              <button
-                className="route-button"
-                onClick={() => setRecenterRouteTrigger((t) => t + 1)}
-                aria-label="Recenter on route"
-              >
-                <Map size={18} color="#FFFFFF" />
-              </button>
-            )}
-          </div>
         </>
       )}
 
@@ -4448,46 +5744,283 @@ const GhanaTrotroTransit = () => {
       </div>
       */}
 
-      {/* Bottom Sheet - Slides up from bottom, draggable */}
-      {showBottomSheet && (
-        <div 
-          className="bottom-sheet-overlay"
-          onClick={handleBottomSheetOverlayClick}
-        >
-          <div
-            className={`bottom-sheet${sheetIsDragging ? ' is-dragging' : ''}`}
-            ref={bottomSheetRef}
-            style={{
-              height: `${sheetDragHeight}vh`,
-              transition: sheetIsDragging ? 'none' : 'height 0.38s cubic-bezier(0.4,0,0.2,1)',
-            }}
-          >
-            {/* ── Drag Handle ── */}
-            <div
-              className="sheet-drag-handle"
-              onMouseDown={handleSheetHandlePointerDown}
-              onTouchStart={handleSheetHandlePointerDown}
-            >
-              <div className="drag-pill" />
-            </div>
+      {/* ── Persistent Bottom Sheet ────────────────────────────────────────
+          Always mounted, always docked to the bottom, never dismissible.
+          Replaces four previously-separate floating pieces (the old modal
+          "bottom sheet" for search/route, the no-overlay "destination bar",
+          and the standalone "stop detail panel") with one shared drag/
+          snap-height container that just switches what content it's
+          showing (see renderBottomSheetContent). Its top-actions row
+          (compass, layer toggle, Google Maps, info, locate, recenter-route)
+          sits just above the sheet and moves with it as it's dragged,
+          since it's positioned relative to the sheet itself rather than
+          the screen. */}
+      <div
+        className={`bottom-sheet${sheetIsDragging ? ' is-dragging' : ''}${!isSheetExpanded ? ' sheet-at-peek' : ''}`}
+        ref={bottomSheetRef}
+        style={{
+          height: `${sheetDragHeight}vh`,
+          // The peek <-> expanded pill/sheet shape change (.sheet-at-peek
+          // toggling left/right/bottom/border-radius, see HomeScreen.css)
+          // rides the same transition as height so it reads as the pill
+          // actually growing into the sheet, not an abrupt shape swap.
+          transition: sheetIsDragging
+            ? 'none'
+            : 'height 0.38s cubic-bezier(0.4,0,0.2,1), left 0.38s cubic-bezier(0.4,0,0.2,1), right 0.38s cubic-bezier(0.4,0,0.2,1), bottom 0.38s cubic-bezier(0.4,0,0.2,1), border-radius 0.38s cubic-bezier(0.4,0,0.2,1)',
+        }}
+      >
+        {/* ── Control cluster ──────────────────────────────────────────
+            A single right-aligned vertical stack, Apple-Maps-style: dark
+            frosted circular buttons sitting just above the sheet, so they
+            track its top edge as it's dragged. All controls show at peek
+            height; only the 3D pill survives past halfway (there just
+            isn't room for the rest above the sheet at that point); the
+            whole cluster disappears once the sheet is full, same as
+            Apple Maps' own controls do once its sheet covers the screen. */}
+        {!isPhotoLightboxOpen && !isSheetNearFull && (
+          <div className="sheet-top-actions">
+            <div className="sheet-top-actions-group">
+              {!isSheetPastHalfway && (
+                <>
+                  {/* Compass / reset north - the map's live bearing now
+                      comes in through MapComponent's onBearingChange, so
+                      the needle keeps rotating even though the button
+                      itself moved out of the map iframe. */}
+                  <button
+                    className="sheet-action-button compass-button"
+                    onClick={() => setResetBearingTrigger((t) => t + 1)}
+                    aria-label="Reset north"
+                    title="Reset North"
+                  >
+                    <svg
+                      viewBox="0 0 40 40"
+                      width="22"
+                      height="22"
+                      xmlns="http://www.w3.org/2000/svg"
+                      style={{ transform: `rotate(${-mapBearing}deg)`, transition: 'transform 0.15s ease-out' }}
+                    >
+                      <path d="M20 4 L23.5 20 L20 18 L16.5 20 Z" fill="#ff453a"/>
+                      <path d="M20 36 L23.5 20 L20 22 L16.5 20 Z" fill="#d1d1d6"/>
+                      <circle cx="20" cy="20" r="3" fill="#ffffff"/>
+                      <circle cx="20" cy="20" r="1.3" fill="#1c1c1e"/>
+                    </svg>
+                  </button>
 
-            <div className="bottom-sheet-content">
-              {renderBottomSheetContent()}
+                  {/* 2D/3D tilt toggle - peek-only now; past halfway the
+                      combined location/route/layer group below takes its
+                      place instead. Label shows the mode tapping it
+                      switches TO; is3DActive/toggle3DTrigger are
+                      forwarded to MapComponent, which eases the map's
+                      actual pitch between 0 and 45. */}
+                  <button
+                    className={`sheet-action-button button-3d${is3DActive ? ' button-3d-active' : ''}`}
+                    onClick={() => {
+                      setIs3DActive((v) => !v);
+                      setToggle3DTrigger((t) => t + 1);
+                    }}
+                    aria-label={is3DActive ? 'Switch to 2D view' : 'Switch to 3D view'}
+                    title={is3DActive ? 'Switch to 2D view' : 'Switch to 3D view'}
+                  >
+                    {is3DActive ? '2D' : '3D'}
+                  </button>
+                </>
+              )}
+
+              {/* Layer, route, and location live together in one
+                  pill-shaped group with a single shared background
+                  (dividers between whichever of the three are actually
+                  rendered), rather than as separate individual circles.
+                  This is the one part of the cluster that stays visible
+                  through the halfway point, matching Apple Maps. */}
+              <div className="sheet-controls-combined">
+                {/* Layer toggle - thumbnail previews the OTHER layer
+                    (what tapping it switches TO), same as it did inside
+                    the map. */}
+                <button
+                  className="sheet-action-button layer-button"
+                  onClick={() => setToggleLayerTrigger((t) => t + 1)}
+                  aria-label="Toggle map layer"
+                  title="Toggle map layer"
+                >
+                  <img src={layerThumbUrl} alt="" />
+                </button>
+
+                {/* Recenter Route - only shown once a route is selected
+                    AND some part of it has been panned off-screen;
+                    tapping it flies the map back to fit the whole route,
+                    same as the initial auto-fit. */}
+                {selectedRoute && selectedRoute?.stops?.length >= 2 && !isRouteVisible && (
+                  <button
+                    className="sheet-action-button route-button"
+                    onClick={() => setRecenterRouteTrigger((t) => t + 1)}
+                    aria-label="Recenter on route"
+                  >
+                    <MapIcon size={17} color="#FFFFFF" />
+                  </button>
+                )}
+
+                {/* Locate Me - only shown when we have a location fix AND
+                    that dot isn't currently visible on screen; tapping it
+                    pans/zooms the map back to it rather than
+                    re-requesting permission. */}
+                {userLocation && !isUserLocationVisible && (
+                  <button
+                    className="sheet-action-button locate-button"
+                    onClick={() => setRecenterUserTrigger((t) => t + 1)}
+                    aria-label="Show my location"
+                  >
+                    <Navigation size={18} color="#FFFFFF" />
+                  </button>
+                )}
+              </div>
+
+              {!isSheetPastHalfway && (
+                <>
+                  {/* Info - only shown to guests; a signed-in user has
+                      already seen this (and has their profile/settings
+                      instead), so there's no need to keep offering it. */}
+                  {!user && (
+                    <button className={`sheet-action-button info-button ${isAnyModalOpen ? 'info-button-dimmed' : ''}`} onClick={() => setShowInfoModal(true)} aria-label="Info">
+                      <Info size={18} color="#FFFFFF" />
+                    </button>
+                  )}
+
+                  {/* Open in Google Maps - only once a route has actually
+                      been found; opens the same stop sequence as
+                      turn-by-turn directions. Kept on its own white chip
+                      (outside the combined group) so the brand mark stays
+                      legible. */}
+                  {selectedRoute && (
+                    <button
+                      className="sheet-action-button google-maps-button"
+                      onClick={openRouteInGoogleMaps}
+                      aria-label="Open route in Google Maps"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="100" height="100" viewBox="0 0 64 64">
+<path fill="#48b564" d="M35.76,26.36h0.01c0,0-3.77,5.53-6.94,9.64c-2.74,3.55-3.54,6.59-3.77,8.06	C24.97,44.6,24.53,45,24,45s-0.97-0.4-1.06-0.94c-0.23-1.47-1.03-4.51-3.77-8.06c-0.42-0.55-0.85-1.12-1.28-1.7L28.24,22l8.33-9.88	C37.49,14.05,38,16.21,38,18.5C38,21.4,37.17,24.09,35.76,26.36z"></path><path fill="#fcc60e" d="M28.24,22L17.89,34.3c-2.82-3.78-5.66-7.94-5.66-7.94h0.01c-0.3-0.48-0.57-0.97-0.8-1.48L19.76,15	c-0.79,0.95-1.26,2.17-1.26,3.5c0,3.04,2.46,5.5,5.5,5.5C25.71,24,27.24,23.22,28.24,22z"></path><path fill="#2c85eb" d="M28.4,4.74l-8.57,10.18L13.27,9.2C15.83,6.02,19.69,4,24,4C25.54,4,27.02,4.26,28.4,4.74z"></path><path fill="#ed5748" d="M19.83,14.92L19.76,15l-8.32,9.88C10.52,22.95,10,20.79,10,18.5c0-3.54,1.23-6.79,3.27-9.3	L19.83,14.92z"></path><path fill="#5695f6" d="M28.24,22c0.79-0.95,1.26-2.17,1.26-3.5c0-3.04-2.46-5.5-5.5-5.5c-1.71,0-3.24,0.78-4.24,2L28.4,4.74	c3.59,1.22,6.53,3.91,8.17,7.38L28.24,22z"></path>
+</svg>
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
+        )}
+
+        {/* ── Drag Handle ── */}
+        <div
+          className="sheet-drag-handle"
+          onPointerDown={handleSheetHandlePointerDown}
+          onPointerMove={handleSheetHandlePointerMove}
+          onPointerUp={handleSheetHandlePointerUp}
+          onPointerCancel={handleSheetHandlePointerUp}
+        >
+          <div className="drag-pill" />
+        </div>
+
+        <div className="bottom-sheet-content">
+          {renderBottomSheetContent()}
+        </div>
+      </div>
+
+      {/* ── Stop Photo Lightbox - full-size preview of a tapped stop-detail
+          image, with left/right paging between that stop's other approved
+          photos. Closes on backdrop tap, the close button, or leaving the
+          stop detail view. ── */}
+      {selectedStopDetail && stopImageLightboxIndex !== null && stopDetailImages[stopImageLightboxIndex] && (
+        <div
+          className="image-lightbox-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) closeStopImageLightbox(); }}
+        >
+          <button
+            className="image-lightbox-close"
+            onClick={closeStopImageLightbox}
+            aria-label="Close photo preview"
+          >
+            <X size={22} strokeWidth={2.5} color="#FFFFFF" />
+          </button>
+
+          {stopDetailImages.length > 1 && (
+            <button
+              className="image-lightbox-nav image-lightbox-nav--prev"
+              onClick={showPrevStopImage}
+              aria-label="Previous photo"
+            >
+              <ChevronLeft size={26} color="#FFFFFF" />
+            </button>
+          )}
+
+          <img
+            src={stopDetailImages[stopImageLightboxIndex].url}
+            alt={selectedStopDetail.name}
+            className="image-lightbox-photo"
+          />
+
+          {stopDetailImages.length > 1 && (
+            <button
+              className="image-lightbox-nav image-lightbox-nav--next"
+              onClick={showNextStopImage}
+              aria-label="Next photo"
+            >
+              <ChevronRight size={26} color="#FFFFFF" />
+            </button>
+          )}
+
+          {stopDetailImages.length > 1 && (
+            <span className="image-lightbox-counter">
+              {stopImageLightboxIndex + 1} / {stopDetailImages.length}
+            </span>
+          )}
         </div>
       )}
 
-      {/* Floating Search Button - Only show when bottom sheet is closed, and
-          hidden while the photo lightbox is open. */}
-      {!showBottomSheet && !isPhotoLightboxOpen && (
-        <div className="floating-button">
+      {/* ── Same lightbox, for the search-results list - shared across every
+          StopResultCard since only one photo preview is ever open at a
+          time, whichever card it was opened from. ── */}
+      {resultLightbox && resultLightbox.images[resultLightbox.index] && (
+        <div
+          className="image-lightbox-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) closeResultLightbox(); }}
+        >
           <button
-            className="search-button-inner"
-            onClick={showRouteDetails}
+            className="image-lightbox-close"
+            onClick={closeResultLightbox}
+            aria-label="Close photo preview"
           >
-            <Search size={24} color="#FFFFFF" />
+            <X size={22} strokeWidth={2.5} color="#FFFFFF" />
           </button>
+
+          {resultLightbox.images.length > 1 && (
+            <button
+              className="image-lightbox-nav image-lightbox-nav--prev"
+              onClick={showPrevResultImage}
+              aria-label="Previous photo"
+            >
+              <ChevronLeft size={26} color="#FFFFFF" />
+            </button>
+          )}
+
+          <img
+            src={resultLightbox.images[resultLightbox.index].url}
+            alt={resultLightbox.name}
+            className="image-lightbox-photo"
+          />
+
+          {resultLightbox.images.length > 1 && (
+            <button
+              className="image-lightbox-nav image-lightbox-nav--next"
+              onClick={showNextResultImage}
+              aria-label="Next photo"
+            >
+              <ChevronRight size={26} color="#FFFFFF" />
+            </button>
+          )}
+
+          {resultLightbox.images.length > 1 && (
+            <span className="image-lightbox-counter">
+              {resultLightbox.index + 1} / {resultLightbox.images.length}
+            </span>
+          )}
         </div>
       )}
 
@@ -4564,6 +6097,7 @@ const GhanaTrotroTransit = () => {
                                 <span className="explore-list-item-name">{route.name}</span>
                                 <span className="explore-list-item-subtext">
                                   GH₵ {route.total_fare} • {route.total_distance}km
+                                  {route.searchCount > 0 && ` • Searched ${route.searchCount}×`}
                                 </span>
                               </div>
                               <ChevronRight size={16} color="#8E8E93" />
@@ -4811,6 +6345,19 @@ const GhanaTrotroTransit = () => {
 
                       <button
                         className="ios-list-row"
+                        onClick={handleOpenNotifications}
+                      >
+                        <span className="ios-row-icon ios-row-icon--orange">
+                          <Bell size={16} color="#FFFFFF" />
+                        </span>
+                        <span className="ios-row-text">Notifications</span>
+                        <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
+                      </button>
+
+                      <div className="ios-list-divider"></div>
+
+                      <button
+                        className="ios-list-row"
                         onClick={() => {
                           if (!user) {
                             setShowGuestSignIn(true);
@@ -4821,7 +6368,7 @@ const GhanaTrotroTransit = () => {
                         }}
                       >
                         <span className="ios-row-icon ios-row-icon--black">
-                          <Map size={16} color="#FFFFFF" />
+                          <MapIcon size={16} color="#FFFFFF" />
                         </span>
                         <span className="ios-row-text">Created Routes</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -5706,7 +7253,6 @@ const GhanaTrotroTransit = () => {
                               setDestination(search.destination);
                               setShowSearchHistoryModal(false);
                               setBottomSheetContent('search');
-                              setShowBottomSheet(true);
                             }}
                           >
                             <span className="ios-row-icon ios-row-icon--blue">
@@ -5733,6 +7279,109 @@ const GhanaTrotroTransit = () => {
                           </button>
                         </div>
                         {idx < searchHistory.length - 1 && (
+                          <div className="ios-list-divider" style={{ marginLeft: '50px' }}></div>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notifications Modal - Non-blocking */}
+      {showNotificationsModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={handleNotificationsModalOverlayClick}
+        >
+          <div className="modal ios-history-modal" ref={modalRef}>
+            <div className="ios-modal-grabber"></div>
+            <div className="modal-header ios-history-header">
+              <button
+                className="ios-modal-back-button"
+                onClick={() => {
+                  setShowNotificationsModal(false);
+                  setShowProfileModal(true);
+                }}
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
+              <h2 className="modal-title">Notifications</h2>
+              <button
+                className="close-button"
+                onClick={() => setShowNotificationsModal(false)}
+              >
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="modal-content ios-history-content">
+              {notificationsLoading ? (
+                <div className="explore-loading">
+                  <div className="loading-spinner explore-loading-spinner"></div>
+                  <p className="explore-loading-text">Loading notifications…</p>
+                </div>
+              ) : notificationsError ? (
+                <div className="explore-error">
+                  <p className="explore-error-text">{notificationsError}</p>
+                  <button
+                    className="explore-retry-button"
+                    onClick={() => user && fetchUserNotifications(user.id, true)}
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : userNotifications.length === 0 ? (
+                <div className="ios-empty-state">
+                  <div className="ios-empty-state-icon">
+                    <Bell size={26} color="#8E8E93" />
+                  </div>
+                  <h3 className="ios-empty-state-title">No Notifications</h3>
+                  <p className="ios-empty-state-text">
+                    You&apos;re all caught up - new notifications will show up here.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {userNotifications.some((n) => !n.is_read) && (
+                    <button
+                      className="ios-clear-history-button"
+                      onClick={handleMarkAllNotificationsRead}
+                    >
+                      <CheckCircle size={14} />
+                      Mark All Read
+                    </button>
+                  )}
+                  <div className="ios-list-group">
+                    {userNotifications.map((n, idx) => (
+                      <React.Fragment key={n.id}>
+                        <button
+                          className={`ios-notification-row${!n.is_read ? ' ios-notification-row--unread' : ''}`}
+                          onClick={() => handleNotificationRowClick(n)}
+                        >
+                          <span className="ios-row-icon ios-row-icon--orange">
+                            <Bell size={15} color="#FFFFFF" />
+                          </span>
+                          <span className="ios-notification-text">
+                            <span className="ios-notification-title-row">
+                              <span className="ios-notification-title">{n.notification?.title}</span>
+                              {!n.is_read && <span className="ios-notification-dot" aria-label="Unread" />}
+                            </span>
+                            {n.notification?.message && (
+                              <span className="ios-notification-message">{n.notification.message}</span>
+                            )}
+                            <span className="ios-history-date">
+                              {new Date(n.notification?.created_at || n.created_at).toLocaleDateString()}
+                            </span>
+                            {n.notification?.action_text && n.notification?.action_url && (
+                              <span className="ios-notification-action">{n.notification.action_text} →</span>
+                            )}
+                          </span>
+                        </button>
+                        {idx < userNotifications.length - 1 && (
                           <div className="ios-list-divider" style={{ marginLeft: '50px' }}></div>
                         )}
                       </React.Fragment>
@@ -5776,7 +7425,7 @@ const GhanaTrotroTransit = () => {
               {createdRoutesHistory.length === 0 ? (
                 <div className="ios-empty-state">
                   <div className="ios-empty-state-icon">
-                    <Map size={26} color="#8E8E93" />
+                    <MapIcon size={26} color="#8E8E93" />
                   </div>
                   <h3 className="ios-empty-state-title">No Created Routes</h3>
                   <p className="ios-empty-state-text">
@@ -5790,7 +7439,7 @@ const GhanaTrotroTransit = () => {
                       <div className="ios-history-row">
                         <div className="ios-history-row-main">
                           <span className="ios-row-icon ios-row-icon--black">
-                            <Map size={15} color="#FFFFFF" />
+                            <MapIcon size={15} color="#FFFFFF" />
                           </span>
                           <span className="ios-history-text">
                             <span className="ios-history-route">
@@ -5974,6 +7623,51 @@ const GhanaTrotroTransit = () => {
               <button
                 className="route-not-found-close-button"
                 onClick={() => setShowRouteNotFoundModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Stop Not Found Modal ── */}
+      {showStopNotFoundModal && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={handleStopNotFoundModalOverlayClick}
+        >
+          <div className="modal stop-not-found-modal">
+            <div className="modal-header">
+              <button
+                className="close-button"
+                onClick={() => setShowStopNotFoundModal(false)}
+              >
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="route-not-found-content">
+              <div className="route-not-found-icon">
+                <Search size={32} color="#F59E0B" />
+              </div>
+              <h3 className="route-not-found-title">Stop Not Found</h3>
+              <p className="route-not-found-msg">
+                We couldn&apos;t find a stop matching <strong>&quot;{stopNotFoundQuery}&quot;</strong>.
+              </p>
+              <p className="route-not-found-msg">
+                You can add it yourself, and it'll be available for everyone once approved.
+              </p>
+              <button
+                className="route-not-found-volunteer-button"
+                onClick={handleAddStopFromNotFound}
+              >
+                <MapPin size={18} color={COLORS.primary} />
+                <span>Add This Stop</span>
+              </button>
+              <button
+                className="route-not-found-close-button"
+                onClick={() => setShowStopNotFoundModal(false)}
               >
                 Close
               </button>
@@ -6223,7 +7917,7 @@ const GhanaTrotroTransit = () => {
                   </div>
                   <div className="feature-item">
                     <div className="feature-icon">
-                      <Map size={16} color={COLORS.primary} />
+                      <MapIcon size={16} color={COLORS.primary} />
                     </div>
                     <span className="feature-text">Storing basic preferences, like your last selected map layer</span>
                   </div>
