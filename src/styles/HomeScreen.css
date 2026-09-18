@@ -29,7 +29,7 @@ body {
 }
 
 /* Button styles */
-.profile-button, .plus-button, .hamburger-button, .info-button, .floating-button {
+.profile-button, .plus-button, .hamburger-button {
   position: absolute;
   background-color: var(--primary-color);
   border: none;
@@ -43,7 +43,7 @@ body {
   transition: transform 0.2s ease;
 }
 
-.profile-button:hover, .plus-button:hover, .hamburger-button:hover, .info-button:hover:hover {
+.profile-button:hover, .plus-button:hover, .hamburger-button:hover {
   transform: scale(1.05);
   background-color: #8b5cf6;
 }
@@ -110,58 +110,167 @@ body {
   border: 0;
 }
 
-/* ── Bottom-right action button stack ─────────────────────────────────
-   All conditionally-rendered bottom-right buttons (Info, Locate Me,
-   Google Maps, Recenter Route) live inside this single flex container
-   instead of each being independently absolute-positioned with a fixed
-   `bottom` offset. That way, whenever one of them isn't rendered (e.g.
-   no route selected, or the user's location is already on screen), the
-   remaining buttons simply close the gap instead of leaving dead space
-   where the hidden button used to be.
-   Rendered in bottom-to-top DOM order (info, locate, google-maps,
-   route) with column-reverse, so the info button anchors the bottom
-   and everything else stacks upward above it. */
-.map-action-stack {
+/* ── Sheet control cluster (compass, 3D, layer toggle, info, locate,
+   Google Maps, recenter-route) ───────────────────────────────────────
+   On mobile (the default here), positioned as a child of .bottom-sheet
+   itself (see HomeScreen.css further down for that rule) rather than the
+   screen, so it tracks the sheet's top edge and moves with it as the
+   sheet is dragged. Styled to match Apple Maps' own control stack: a
+   single right-aligned column of dark, frosted, semi-translucent
+   circular buttons sitting just above the sheet. On desktop (see the
+   min-width: 1024px override below) it's pinned to the screen's
+   bottom-right corner instead, independent of the sheet - which makes
+   sense there since the sheet itself is a centered, width-capped card
+   rather than a full-width mobile sheet, so anchoring controls to its
+   edge would leave them stranded away from the actual corner of the
+   window. Which buttons render at any given moment is decided in
+   HomeScreen.js (isSheetPastHalfway / isSheetNearFull) rather than here -
+   this file just styles whatever's currently mounted. */
+.sheet-top-actions {
   position: absolute;
-  bottom: 30px;
-  right: 20px;
+  left: 0;
+  right: 0;
+  bottom: 100%;
   display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
-  gap: 12px;
-  z-index: 1000;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 14px 12px;
+  pointer-events: none;
 }
 
-.locate-button,
-.google-maps-button,
-.route-button,
-.info-button {
+@media (min-width: 1024px) {
+  .sheet-top-actions {
+    position: fixed;
+    left: auto;
+    right: 24px;
+    bottom: 24px;
+    padding: 0;
+  }
+}
+
+.sheet-top-actions-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.sheet-action-button {
+  pointer-events: auto;
   position: static;
-  width: 48px;
-  height: 48px;
-  background-color: var(--primary-color);
-  border: none;
+  width: 44px;
+  height: 44px;
+  background: rgba(40, 40, 43, 0.62);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 0.5px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-  transition: transform 0.2s ease, background-color 0.2s ease;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  overflow: hidden;
+  color: #ffffff;
+  font-family: inherit;
 }
 
+.sheet-action-button:hover {
+  transform: scale(1.05);
+  background: rgba(58, 58, 62, 0.72);
+}
+
+.sheet-action-button:active {
+  transform: scale(0.94);
+}
+
+.compass-button {
+  background: rgba(40, 40, 43, 0.62);
+}
+
+/* 2D/3D tilt toggle - a rounded square (not a full circle) with a text
+   label, same shape Apple Maps uses for this control so it reads as a
+   distinct "mode" button rather than another icon in the stack. */
+.button-3d {
+  border-radius: 32px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.button-3d-active {
+  background: rgba(70, 70, 76, 0.78);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.layer-button {
+  padding: 0;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.layer-button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Google's brand mark stays on its own white chip, same as the rest of
+   the app does with recognizable logos, even inside the otherwise dark
+   control cluster. */
 .google-maps-button {
   background-color: #fff;
-  padding-left: 10px;
-  padding-top: 10px;
+  border-color: rgba(0, 0, 0, 0.06);
+  padding-left: 8px;
+  padding-top: 8px;
 }
 
-.locate-button:hover,
-.google-maps-button:hover,
-.route-button:hover,
-.info-button:hover {
-  transform: scale(1.05);
-  background-color: #8b5cf6;
+/* Layer, recenter-route, and location grouped into one pill (top to
+   bottom, in that order) with a single shared background instead of
+   three separate circles - only whichever of the three are actually
+   rendered end up inside it (the route/locate buttons are conditional),
+   with a hairline divider between neighbors. This is also the one part
+   of the cluster that stays up through the sheet's halfway point (see
+   HomeScreen.js) rather than disappearing with the rest. The group
+   itself carries the frosted background/border/shadow that individual
+   .sheet-action-buttons normally have; the buttons inside it go
+   transparent so only one background shows through. */
+.sheet-controls-combined {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: rgba(40, 40, 43, 0.62);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 0.5px solid rgba(255, 255, 255, 0.18);
+  border-radius: 22px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.sheet-controls-combined .sheet-action-button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.sheet-controls-combined .sheet-action-button:not(:first-child) {
+  border-top: 0.5px solid rgba(255, 255, 255, 0.16);
+}
+
+.sheet-controls-combined .sheet-action-button:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sheet-controls-combined .sheet-action-button:active {
+  transform: none;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* Map mode toggle — bottom left */
@@ -212,11 +321,6 @@ body {
   padding: 3px 0;
   line-height: 1;
   text-transform: uppercase;
-}
-
-.floating-button {
-  bottom: 30px;
-  left: 50%;
 }
 
 .app-title-top-left {
@@ -312,20 +416,6 @@ body {
   }
 }
 
-.search-button-inner {
-  width: 56px;
-  height: 56px;
-  background-color: var(--primary-color);
-  border: none;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-}
-
-/* Overlay and Modal styles */
 .search-overlay, .route-overlay, .modal-overlay {
   position: fixed;
   top: 0;
@@ -580,7 +670,7 @@ body {
   background-color: #F3F4F6;
   border-radius: 18px;
   padding: 12px;
-  min-height: 50px;
+  min-height: 40px;
   border: 1.5px solid transparent;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
@@ -667,18 +757,18 @@ body {
     flex: 1 1 85%;
     width: 90%;
     margin-left: -10%;
-    order: 1;
+    order: 0;
   }
 
   .swap-button {
-    order: 2;
+    order: 1;
     margin-top: -60px;
-    margin-left: 91%
+    margin-left: 91%;
+    transform: translateX(-90deg);
   }
 
   /* Destination input goes full width on its own line */
   .input-container:not(.input-container-start) {
-    order: 3;
     flex: 1 1 100%;
     width: 100%;
   }
@@ -1196,6 +1286,7 @@ body {
 .ios-row-icon--green  { background: #34C759; }
 .ios-row-icon--teal   { background: #14B8A6; }
 .ios-row-icon--red    { background: #EF4444; }
+.ios-row-icon--orange { background: #F59E0B; }
 .ios-row-icon--black  { background: #000000; }
 
 .ios-row-text {
@@ -1444,6 +1535,82 @@ body {
   background: #F2F2F7;
 }
 
+/* Notification rows reuse .ios-list-group/.ios-list-divider for the outer
+   list, and .ios-row-icon for the leading bell icon - only the row itself
+   and its text block are notification-specific. */
+.ios-notification-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  gap: 12px;
+}
+
+.ios-notification-row:active {
+  background: #F2F2F7;
+}
+
+.ios-notification-row--unread {
+  background: #FFFBEB;
+}
+
+.ios-notification-row--unread:active {
+  background: #FEF3C7;
+}
+
+.ios-notification-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.ios-notification-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ios-notification-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1C1C1E;
+}
+
+.ios-notification-row--unread .ios-notification-title {
+  font-weight: 700;
+}
+
+.ios-notification-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #F59E0B;
+}
+
+.ios-notification-message {
+  font-size: 13px;
+  color: #6B7280;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ios-notification-action {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-top: 2px;
+}
+
 .ios-empty-state {
   display: flex;
   flex-direction: column;
@@ -1500,11 +1667,6 @@ body {
   overflow-y: auto;
 }
 
-.floating-button{
-    left: 50%;
-    transform: translateX(-50%);
-  }
-
 /* Responsive design */
 @media (max-width: 768px) {
   .search-modal, .route-modal, .modal {
@@ -1545,19 +1707,6 @@ body {
   .get-app-button{
     top:220px;
     z-index: 1;
-  }
-
-  /* The stack container now owns positioning for locate/google-maps/
-     route/info — bumped up from the default 30px so it clears the
-     floating search button on small screens, same as before. */
-  .map-action-stack {
-    bottom: 80px;
-    right: 20px;
-    z-index: 1;
-  }
-
-  .floating-button{
-    bottom: 80px;
   }
 
   .map-mode-button {
@@ -1731,6 +1880,19 @@ body {
   background: transparent;
   cursor: pointer;
   font-weight: 600;
+}
+
+/* Stop Not Found modal reuses .route-not-found-content/-icon/-title/-msg/
+   -volunteer-button/-close-button for its inner layout - only the modal
+   wrapper itself needs its own sizing rule. */
+.stop-not-found-modal {
+  max-width: 380px;
+  text-align: center;
+}
+
+.stop-not-found-modal .modal-header {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .suggestion-item {
@@ -2344,22 +2506,21 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════
-   DRAGGABLE BOTTOM SHEET — redesigned
+   PERSISTENT BOTTOM SHEET
+   Always mounted, always docked to the bottom, never dismissed - replaces
+   the old dark-overlay modal sheet (no overlay needed since there's
+   nothing to dismiss it back to) plus the standalone destination bar and
+   stop detail panel. Positioned exactly the way those two used to be
+   (fixed, centered, no backdrop) since the map stays interactive
+   underneath at all times.
 ══════════════════════════════════════════════════════════ */
 
-.bottom-sheet-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  z-index: 1002;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
 .bottom-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0 auto;
   background: #ffffff;
   border-radius: 24px 24px 0 0;
   width: 100%;
@@ -2367,7 +2528,12 @@ body {
   /* height is controlled by JS via inline style */
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Was `hidden`, but the top-actions row (compass, layer toggle,
+     Google Maps, info, locate, recenter-route) is a child positioned
+     with `bottom: 100%` so it sits just above this box - `hidden` here
+     clipped it out of view entirely. Inner scrolling/clipping is still
+     handled by .bottom-sheet-content's own `overflow: hidden` below. */
+  overflow: visible;
   box-shadow:
     0 -8px 32px rgba(107, 33, 168, 0.10),
     0 -2px 8px rgba(0, 0, 0, 0.06);
@@ -2379,6 +2545,27 @@ body {
 .bottom-sheet.is-dragging {
   cursor: grabbing;
   user-select: none;
+}
+
+/* ── Peek state - floating rounded pill ───────────────
+   All the way down, the sheet is just the search bar (see
+   .sheet-at-peek hiding .destination-bar-scroll above), so it's styled
+   to read as its own floating capsule sitting just above the bottom of
+   the screen - fully rounded on every corner, with a visible gap on all
+   sides revealing the map underneath - rather than a flat-bottomed panel
+   flush with the screen edge. Dragging it up past peek (isSheetExpanded
+   in HomeScreen.js drops this class) is what makes it "expand" back into
+   the ordinary full-width, flush-bottomed, top-rounded-only sheet - the
+   same left/right/bottom/border-radius properties animate together with
+   height via the inline transition on .bottom-sheet, so the pill visibly
+   grows into the sheet rather than just swapping shape instantly. */
+.bottom-sheet.sheet-at-peek {
+  left: 12px;
+  right: 12px;
+  bottom: 20px;
+  width: auto;
+  max-width: calc(820px - 24px);
+  border-radius: 32px;
 }
 
 @keyframes sheetSlideUp {
@@ -2393,13 +2580,13 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 10px 0 4px;
+  padding: 0px 0 0px;
   cursor: grab;
   touch-action: none;
-  background: #ffffff;
-  border-radius: 24px 24px 0 0;
+  background: #ffffff00;
+  border-radius: 32px;
   /* subtle top accent line */
-  border-top: 2px solid rgba(107, 33, 168, 0.08);
+  border-top: 2px solid rgba(0, 0, 0, 0);
 }
 
 .sheet-drag-handle:active,
@@ -2439,8 +2626,9 @@ body {
   align-items: flex-start;
   padding: 12px 0 14px;
   margin-bottom: 14px;
-  border-bottom: 1.5px solid #f1f5f9;
   background: #fff;
+  border-radius: 32px;;
+
 }
 
 .header-content {
@@ -2494,14 +2682,652 @@ body {
   z-index: 1;
 }
 
+/* Quick search - single field + inline search button, used by the
+   destination bar and appearing once the user starts typing. Sits inside
+   .search-card / .destination-bar-content so it matches the surrounding
+   styling. */
+.quick-search-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  flex-wrap: nowrap;
+  margin-bottom: 15px;
+}
+
+.quick-search-row .input-container {
+  flex: 1;
+  /* Match the quick-search button's height exactly. */
+  height: 48px;
+}
+
+
+/* The search button (once it appears) always sits on the right of the
+   input, at every screen size - last flex child by DOM order, pinned
+   there explicitly so nothing can wrap or reorder it away. */
+.quick-search-button {
+  order: 2;
+  margin-left: auto;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border-radius: 50%;
+  background-color: var(--primary-color);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.quick-search-button:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+}
+
+.quick-search-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.quick-search-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Destination content - the old standalone "destination bar" is now one
+   of the things the persistent .bottom-sheet above can show (see
+   renderDestinationContent). Only its inner content styling remains here;
+   outer positioning/dragging is the shared .bottom-sheet/.sheet-drag-handle
+   rules above.
+══════════════════════════════════════════════════════════ */
+.destination-bar-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px 10px 0;
+}
+
+/* The input row is the only fixed part of the bar's content - it never
+   scrolls out of view, no matter how far the section below it is scrolled. */
+.destination-bar-content > .quick-search-row {
+  flex-shrink: 0;
+}
+
+/* Everything else (Recent Searches, suggestions/Popular Routes/Stops Near
+   You, and the quick actions row) scrolls independently underneath the
+   pinned input row. */
+.destination-bar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+
+/* At peek height (sheet all the way down, see .sheet-at-peek on
+   .bottom-sheet), every content type the sheet can show is tucked down
+   to just its own top input/header row - no sliver of body content
+   (Recent Searches, a route's stop list, a stop's photos, route info
+   sections...) peeking out or getting clipped mid-element underneath it.
+   Everything below stays fully hidden until the user actually drags the
+   sheet up past peek, matching Apple Maps' own collapsed search bar. Each
+   selector below is that content type's own "everything after the
+   header/input" wrapper - see the matching render function in
+   HomeScreen.js for how each is structured:
+     - .destination-bar-scroll   → renderDestinationContent (ambient view)
+     - .recent-searches          → renderSearchForm (its back-button
+                                    topbar stays up, and see the
+                                    search-card rule just below for what
+                                    else drops out of the card itself)
+     - .route-details-body       → renderRouteDetails (its header stays up;
+                                    see the rule just below for which of
+                                    its buttons drop out too)
+     - .route-info > .scroll-view→ renderRouteInfo (its header stays up;
+                                    scoped to a direct child since
+                                    renderSearchForm also has an unrelated
+                                    .scroll-view that WRAPS its header,
+                                    which must stay visible)
+     - .swipe-indicator          → the "swipe for details/info" hint,
+                                    shared by both route views
+     - .stop-detail-search-row,
+       .stop-detail-body         → renderStopDetailContent /
+                                    renderStopSearchResultsContent. Both
+                                    views override this rule right back to
+                                    visible (see .stop-detail-single-search-
+                                    row further down), so a collapsed stop
+                                    detail or search-results list shows its
+                                    search row, centered, instead of the
+                                    summary/count row below (which that same
+                                    override hides). The photos/nearby body
+                                    always drops out either way */
+.bottom-sheet.sheet-at-peek .destination-bar-scroll,
+.bottom-sheet.sheet-at-peek .stop-detail-search-row,
+.bottom-sheet.sheet-at-peek .recent-searches,
+.bottom-sheet.sheet-at-peek .route-details-body,
+.bottom-sheet.sheet-at-peek .route-info > .scroll-view,
+.bottom-sheet.sheet-at-peek .swipe-indicator,
+.bottom-sheet.sheet-at-peek .stop-detail-body {
+  display: none;
+}
+
+/* Within the search card itself, only the start input stays up at peek -
+   the swap button, destination field, suggestions and Find Routes button
+   all drop out along with .recent-searches above, so a collapsed search
+   form reads as a single "where are you starting from?" bar. */
+.bottom-sheet.sheet-at-peek .search-card .swap-button,
+.bottom-sheet.sheet-at-peek .search-card .input-container:not(.input-container-start),
+.bottom-sheet.sheet-at-peek .search-card .suggestions-container,
+.bottom-sheet.sheet-at-peek .search-card .search-button {
+  display: none;
+}
+
+/* Within the route-details header, only the route name and the New
+   Search button stay up at peek - the info-toggle (swipe to Route Info)
+   and close buttons drop out, so a collapsed route reads as a compact
+   "route name + start a new search" bar. */
+.bottom-sheet.sheet-at-peek .route-details .header-buttons .info-toggle-button,
+.bottom-sheet.sheet-at-peek .route-details .header-buttons .close-button {
+  display: none;
+}
+
+.destination-bar-explore {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-top: 8px;
+}
+
+.destination-bar-section-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 10px;
+  padding-left: 10px;
+}
+
+.destination-bar-section{
+  margin-bottom: 20px;
+}
+
+.destination-bar-hscroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.destination-bar-hscroll::-webkit-scrollbar {
+  display: none;
+}
+
+.destination-bar-card {
+  flex: 0 0 auto;
+  width: 132px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  background: #f8fafc;
+  border: 1.5px solid #f1f5f9;
+  border-radius: 18px;
+  padding: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s ease, transform 0.1s ease;
+}
+
+.destination-bar-recent {
+  margin-bottom: 20px;
+}
+
+.destination-bar-card:hover {
+  border-color: var(--primary-light);
+}
+
+.destination-bar-card:active {
+  transform: scale(0.97);
+}
+
+.destination-bar-card-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.destination-bar-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.destination-bar-card-sub {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.destination-bar-empty {
+  font-size: 13px;
+  color: var(--text-light);
+  padding: 8px 0;
+  margin: 0;
+}
+
+.destination-bar-suggestions {
+  margin-top: 8px;
+}
+
+/* ── Quick actions row - Sign Up (guests only), Report an Issue,
+   Buy Me Waakye, Download - pinned to the bottom of the destination bar. ── */
+.destination-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+}
+
+.destination-bar-action-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: #ad20dc10;
+  color: var(--primary-color);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.destination-bar-action-button:hover {
+  border-color: var(--primary-light);
+  background: #F5F3FF;
+}
+
+.destination-bar-action-button--primary {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #FFFFFF;
+}
+
+.destination-bar-action-button--primary:hover {
+  background: var(--primary-dark);
+}
+
+/* Stack full-width on mobile instead of wrapping pills. */
+@media (max-width: 480px) {
+  .destination-bar-actions {
+    flex-direction: column;
+  }
+
+  .destination-bar-action-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Stop Detail content - opened from the destination content (search, a
+   suggestion, or a Stops Near You card). Now one of the things the
+   persistent .bottom-sheet can show (see renderStopDetailContent); only
+   its inner content styling remains here.
+══════════════════════════════════════════════════════════ */
+/* ── Search row - back button + the same destination field the ambient
+   destination content uses, so another stop can be searched for from
+   inside a stop's detail view (or the search-results list). Inset matches
+   .destination-bar-content's so the field doesn't visibly jump when the
+   sheet switches between the two. Hidden at peek by the general
+   .sheet-at-peek group above - except the .stop-detail-single-search-row
+   instances below, which are shown there instead, centered. ── */
+.stop-detail-search-row {
+  flex-shrink: 0;
+  padding: 4px 10px 0;
+}
+
+.stop-detail-search-row .input-container {
+  /* .quick-search-row's own rule gives this a 15px bottom margin to
+     separate it from the scrolling content below; here the summary row
+     right underneath supplies that spacing itself. */
+  margin-bottom: 0;
+}
+
+/* ── Summary row - stop name (+ distance) and Directions; the
+   search-results list reuses this same class for its "N stops found"
+   count bar. Rendered whenever the sheet is expanded; at peek height both
+   views swap this out for their search row instead (see
+   .stop-detail-single-summary-row below). ── */
+.stop-detail-summary-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* Roughly the same total height as the destination content's own peek
+     row (input + its 15px margin), so SHEET_PEEK fits this content just
+     as snugly as it fits that. */
+  padding: 10px 15px 12px;
+}
+
+/* ── Peek height for the stop detail view AND the search-results list -
+   the search row above becomes the whole (collapsed) sheet instead of the
+   summary/count row, centered as a compact group rather than stretched
+   edge-to-edge. Both rules need to win over the general .sheet-at-peek
+   group further up this file (same selector specificity -
+   .bottom-sheet.sheet-at-peek plus one class - so they're placed after it
+   in source order). ── */
+.bottom-sheet.sheet-at-peek .stop-detail-single-search-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+}
+
+.bottom-sheet.sheet-at-peek .stop-detail-single-search-row .input-container {
+  flex: 0 1 340px;
+}
+
+.bottom-sheet.sheet-at-peek .stop-detail-single-summary-row {
+  display: none;
+}
+
+.stop-detail-summary-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stop-detail-summary-name {
+  max-width: 100%;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stop-detail-summary-distance {
+  font-size: 13px;
+  color: var(--text-light);
+  font-weight: 500;
+}
+
+.stop-detail-back-button {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: #F3F4F6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-color);
+  transition: background-color 0.2s ease;
+}
+
+.stop-detail-back-button:hover {
+  background: #E5E7EB;
+}
+
+.stop-detail-directions-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--primary-color);
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #FFFFFF;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.stop-detail-directions-button:hover {
+  background: var(--primary-dark);
+}
+
+/* Now unreachable in practice: the single stop detail view's summary row
+   (where this button lives) is itself hidden at peek height (see
+   .stop-detail-single-summary-row above), so it never gets the chance to
+   shrink like this. Left in case a future view still wants Directions
+   pinned at peek the way this one used to. */
+.bottom-sheet.sheet-at-peek .stop-detail-directions-label {
+  display: none;
+}
+
+.bottom-sheet.sheet-at-peek .stop-detail-directions-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+/* ── Body: photos then nearby-stops (or, while something is typed in the
+   search row above, the suggestion list) - all scroll together beneath
+   the pinned search + summary rows. The name and distance moved up into
+   .stop-detail-summary-row so they stay visible while this scrolls, and
+   so they survive the sheet being dragged down to peek. Horizontal
+   padding matches the two rows above it (10px here + 20px on
+   .bottom-sheet-content) so nothing steps in or out. ── */
+.stop-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 15px 24px;
+}
+
+.stop-detail-images {
+  margin: 16px 0;
+}
+
+.stop-detail-images-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stop-detail-images-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.stop-detail-image-button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: block;
+  border-radius: 16px;
+}
+
+.stop-detail-image {
+  display: block;
+  width: 220px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 16px;
+  background: #F3F4F6;
+}
+
+.stop-detail-images-placeholder {
+  height: 150px;
+  border-radius: 16px;
+  background: #F3F4F6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stop-detail-nearby {
+  margin-top: 4px;
+}
+
+/* ── Search-results list - up to 7 stops matching what was typed in the
+   destination bar (see renderStopSearchResultsContent / StopResultCard).
+   Each card reuses the very same stop-detail-summary-row/images/nearby
+   classes as the single-stop view above; this just stacks them with a
+   divider between entries. ── */
+.stop-search-results-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.stop-search-result-card {
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.stop-search-result-card:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+/* Inside a result card the summary row has no sheet-edge padding to share
+   with (unlike the single-stop view, where it sits outside the scrolling
+   body), so it goes flush instead of matching that row's own padding. */
+.stop-search-result-card .stop-detail-summary-row {
+  padding: 0 0 12px;
+}
+
+/* ── Stop Photo Lightbox - full-size tap-to-preview for stop-detail
+   images, with paging between a stop's other approved photos. ── */
+.image-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1006;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: lightboxFadeIn 0.2s ease;
+}
+
+@keyframes lightboxFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.image-lightbox-photo {
+  max-width: 92vw;
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.image-lightbox-close,
+.image-lightbox-nav {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background-color 0.2s ease;
+}
+
+.image-lightbox-close:hover,
+.image-lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+}
+
+.image-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+}
+
+.image-lightbox-nav--prev { left: 16px; }
+.image-lightbox-nav--next { right: 16px; }
+
+.image-lightbox-counter {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+@media (max-width: 480px) {
+  .image-lightbox-nav {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+@media (max-width: 480px) {
+  .destination-bar-card {
+    width: 118px;
+    padding: 12px;
+  }
+
+  .stop-detail-image {
+    width: 180px;
+    height: 130px;
+  }
+}
+
 /* Enhanced Search Card */
 .search-card {
-  background: #f8fafc;
+  background: #00000000;
   border-radius: 26px;
   padding: 20px;
   margin-bottom: 18px;
-  border: 1.5px solid #f1f5f9;
-  box-shadow: 0 2px 12px rgba(107, 33, 168, 0.04);
+  border: none;
+  margin-left: 5px;
+  margin-right: 5px;
 }
 
 /* Enhanced Input Containers */
@@ -2510,8 +3336,8 @@ body {
   display: flex;
   align-items: center;
   background: #fff;
-  border-radius: 20px;
-  padding: 14px 16px;
+  border-radius: 32px;
+  padding: 8px 16px;
   border: 2px solid #f1f5f9;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
@@ -2634,12 +3460,10 @@ body {
 .profile-button,
 .plus-button,
 .hamburger-button,
-.get-app-button,
-.map-action-stack,
-.floating-button { z-index: 1000; }
+.get-app-button { z-index: 1000; }
 
+.bottom-sheet         { z-index: 1002; }
 .modal-overlay       { z-index: 1003; }
-.bottom-sheet-overlay { z-index: 1002; }
 .explore-drawer-overlay { z-index: 1002; }
 .loading-overlay     { z-index: 1005; }
 
@@ -2712,9 +3536,9 @@ body {
 
 /* Enhanced Search Button */
 .search-button {
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+  background: var(--primary-color);
   border-radius: 22px;
-  padding: 18px 24px;
+  padding: 12px 18px;
   border: none;
   display: flex;
   align-items: center;
@@ -3124,6 +3948,57 @@ body {
   transform: scale(0.94);
 }
 
+/* Stands in for the old title/subtitle search-form header - just enough
+   chrome to get back to the ambient destination view (see closeBottomSheet
+   in HomeScreen.js). Sits in its own slim row above the search card so the
+   card's start input, not a tall header, is what shows once the sheet is
+   dragged back down to peek. */
+.search-form-topbar {
+  display: flex;
+  align-items: center;
+  border-radius: 32px;
+  padding: 0px;
+  justify-content: start;
+  background-color: #fff;
+  width: auto;
+  margin-top: 5px;
+}
+
+.search-back-button {
+  width: 34px;
+  height: 34px;
+  background: rgba(120, 120, 128, 0.16);
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1E293B;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  margin-top: 10px;
+  margin-left: 10px;
+  margin-bottom: 5px;
+}
+
+.search-back-button:hover {
+  background: rgba(120, 120, 128, 0.26);
+}
+
+.search-back-button:active {
+  transform: scale(0.94);
+}
+
+.search-form-title{
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-color);
+  margin-left: 12px;
+  margin-top: 5px;
+}
+
 .new-search-button {
   background: var(--primary-color);
   border: none;
@@ -3160,22 +4035,36 @@ body {
   }
   
   .search-card {
-    padding: 20px;
+    padding: 10px ;
   }
   
   .input-row {
-    flex-direction: column;
-    gap: 12px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
   }
-  
+
+  /* Swap button sits on the same line as the start input; the
+     destination input wraps down to its own full-width line below it. */
+  .input-container-start {
+    flex: 1 1 calc(100% - 52px);
+    width: auto;
+    margin-left: 0;
+    order: 0;
+  }
+
   .swap-button {
-    order: 3;
+    order: 0;
     align-self: center;
-    transform: rotate(90deg);
+    margin-top: 0;
+    margin-left: 0;
+    /* Keep the up/down arrows pointing up/down on mobile instead of
+       being rotated to look like a left/right swap. */
+    transform: none;
   }
   
   .swap-button:hover {
-    transform: rotate(270deg);
+    transform: rotate(180deg);
   }
   
   .route-summary-cards {
@@ -3219,7 +4108,7 @@ body {
 
 /* Ensure smooth transitions for info button */
 .info-button {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.15s ease, background-color 0.15s ease;
 }
 
 /* Make sure other buttons remain fully opaque */
@@ -3229,8 +4118,7 @@ body {
 .get-app-button,
 .locate-button,
 .google-maps-button,
-.route-button,
-.floating-button {
+.route-button {
   opacity: 1 !important;
 }
 .auth-forgot-password {
@@ -3449,19 +4337,8 @@ body {
     font-size: 14px;
   }
 
-  .input-container {
+  .input-container:not(.input-container-start) {
     width: 100%;
-  }
-
-  .input-container-start {
-    width: 85%;
-    margin-left: -15%;
-  }
-
-  .swap-button {
-    margin-top: 0px;
-    margin-top: -60px;
-    margin-left: 85%
   }
 }
 
@@ -3628,7 +4505,6 @@ body {
   background: white;
   z-index: 5;
   padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
 }
 
 .header-buttons {
@@ -3887,8 +4763,7 @@ body {
 .plus-button,
 .hamburger-button,
 .get-app-button,
-.info-button,
-.floating-button {
+.info-button {
   animation: none !important;
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
@@ -4088,6 +4963,7 @@ body, #root {
   margin-top: 20px;
   margin-left: 10px;
   margin-right: 10px;
+  margin-bottom: 20px;
 }
 
 .recent-searches-title {
@@ -4108,11 +4984,11 @@ body, #root {
   align-items: center;
   padding: 12px;
   background: #F8FAFC;
-  border: 1px solid #F1F5F9;
-  border-radius: 18px;
+  border: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  gap: 12px;
+  gap: 8px;
+  border-bottom: 1px solid #000;
 }
 
 .recent-search-item:hover {
@@ -4606,17 +5482,14 @@ body, #root {
 .recent-searches-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid #f1f5f9;
 }
 
 .recent-search-item {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 12px 16px;
   background: white;
   border: none;
-  border-bottom: 1px solid #f8fafc;
   cursor: pointer;
   transition: background-color 0.18s ease;
   gap: 12px;
@@ -5516,6 +6389,7 @@ body, #root {
   justify-content: space-between;
   padding: 6px 14px 16px;
   gap: 12px;
+  padding-bottom: 0;
 }
 
 .route-details .header-content {
@@ -5531,6 +6405,8 @@ body, #root {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-top: 10px;
+
 }
 
 .route-details .route-subtitle {
