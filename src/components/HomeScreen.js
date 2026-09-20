@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { 
   ArrowUpDown, Copy, Info, Lock, MapPin, Navigation, 
   Search, Share2, User, X, Plus, History, Key, 
@@ -44,6 +44,59 @@ import SeoContent from './SeoContent';
 
 // Users with more than this many contributions get the trotro badge next to their name.
 const CONTRIBUTOR_BADGE_THRESHOLD = 5;
+
+// ── Bottom sheet sizing ────────────────────────────────────────────────────
+// Every resting height of the persistent bottom sheet (peek / half / full)
+// is worked out here, in one place, for phones and desktops alike - tweak
+// these constants rather than hunting through the component.
+//
+// The drag/snap logic keeps working in "vh of window.innerHeight" (so none of
+// it had to change), but the sheet is *rendered* in px from that (see the
+// inline height on .bottom-sheet). That matters on mobile browsers, where CSS
+// `vh` is measured against the tallest viewport (URL bar hidden) and so
+// renders taller than what is actually on screen.
+//
+// Peek is a fixed pixel height, not a vh: what has to fit inside it is a
+// fixed-size chunk of UI (grabber + one 48px input row), so a vh-based peek
+// clipped it on short phones and left dead space on tall desktop windows.
+const SHEET_PEEK_PX = 76; // 13px grabber zone + 48px input row + 15px of balanced breathing room
+const SHEET_DESKTOP_MIN_WIDTH = 1024; // same breakpoint as the desktop overrides in HomeScreen.css
+const SHEET_FULL_VH_MOBILE = 85; // phones / tablets: nearly the whole screen
+const SHEET_FULL_VH_DESKTOP = 56; // desktop: a more modest ceiling so it doesn't swallow the map
+const SHEET_MIN_FULL_PX = 420; // short windows: never let "full" be too small to use
+const SHEET_TOP_GAP_PX = 56; // always leave at least this much map visible above a full sheet
+const SHEET_ROUTE_FULL_VH_MIN = 42; // route content: dynamic full snap is clamped to this range
+const SHEET_ROUTE_FULL_VH_MAX = 88;
+
+// Returns the three resting heights [peek, half, full] in vh of `viewportH`.
+// Pass the selected route (or null) - a route's full snap grows with its
+// stop count so short routes don't leave a sheet full of empty space.
+const computeSheetSnaps = (viewportW, viewportH, route) => {
+  const h = Math.max(viewportH, 1);
+  const toVh = (px) => (px / h) * 100;
+  const peek = toVh(SHEET_PEEK_PX);
+
+  let full;
+  if (route) {
+    // header ~160px, summary cards ~80px, ~72px per stop row, ~40px padding
+    const stopCount = route.is_composite
+      ? (route.compositionSegments?.length ?? 0) + 1
+      : (route.stops?.length ?? 0);
+    const estimatedVh = toVh(160 + 80 + stopCount * 72 + 40);
+    full = Math.min(Math.max(estimatedVh, SHEET_ROUTE_FULL_VH_MIN), SHEET_ROUTE_FULL_VH_MAX);
+  } else {
+    full = viewportW >= SHEET_DESKTOP_MIN_WIDTH ? SHEET_FULL_VH_DESKTOP : SHEET_FULL_VH_MOBILE;
+  }
+
+  // Guard rails for unusually short windows (small laptops, landscape
+  // phones): never smaller than a usable height, never so tall it covers
+  // the whole map, and always clearly taller than peek.
+  full = Math.max(full, toVh(SHEET_MIN_FULL_PX));
+  full = Math.min(full, toVh(h - SHEET_TOP_GAP_PX));
+  full = Math.max(full, peek + toVh(40));
+
+  return [peek, (peek + full) / 2, full];
+};
 
 // ── Client-side cache / request-guard tuning ───────────────────────────────
 // These bound how often the app is willing to re-hit Supabase for the same
@@ -103,6 +156,189 @@ const InstagramIcon = ({ size = 26 }) => (
     <circle cx="16.2" cy="7.8" r="0.9" fill="#FFFFFF" />
   </svg>
 );
+
+// ── Compass button (Apple-Maps-style) ──────────────────────────────────────
+// A dark disc with a ring of 16 tick marks. The ring rotates so the red
+// triangle always points at true north, while the big letter in the middle
+// stays upright and names the direction the top of the map is facing (N, E,
+// S or W). When the map is facing north the button fades out and unmounts,
+// same as Apple Maps, and fades back in as soon as the map is rotated.
+const COMPASS_TICK_COUNT = 16;          // one tick every 22.5 degrees
+const COMPASS_HIDE_TOLERANCE_DEG = 1;   // treat anything this close to north as north
+const COMPASS_FADE_MS = 220;            // keep in sync with the transition in HomeScreen.css
+const COMPASS_SMOOTHING_MS = 55;        // how quickly the ring catches up with the map (smaller = snappier)
+
+const normalizeBearing = (deg) => ((deg % 360) + 360) % 360;
+
+const isFacingNorth = (bearing) => {
+  const b = normalizeBearing(bearing);
+  return Math.min(b, 360 - b) < COMPASS_HIDE_TOLERANCE_DEG;
+};
+
+// Which of the four letters to show. Each letter owns a 90 degree sector
+// centred on its direction, e.g. N covers 315 to 45.
+const COMPASS_DIRECTION_NAMES = { N: 'north', E: 'east', S: 'south', W: 'west' };
+const getCompassLetter = (bearing) => {
+  const b = normalizeBearing(bearing);
+  if (b >= 315 || b < 45) return 'N';
+  if (b < 135) return 'E';
+  if (b < 225) return 'S';
+  return 'W';
+};
+
+// Tiny external store for the map's live bearing. The map reports a new
+// bearing on every frame while it is being rotated. Keeping that out of React
+// state means those updates only reach the compass (which moves its ring
+// straight on the DOM) instead of re-rendering the whole HomeScreen 60 times
+// a second, which is what made the compass feel shaky.
+const createBearingStore = () => {
+  let value = 0;
+  const listeners = new Set();
+  return {
+    get: () => value,
+    set: (next) => {
+      if (typeof next !== 'number' || Number.isNaN(next) || next === value) return;
+      value = next;
+      listeners.forEach((fn) => fn(next));
+    },
+    subscribe: (fn) => {
+      listeners.add(fn);
+      return () => { listeners.delete(fn); };
+    },
+  };
+};
+
+// Tick marks are drawn once, pointing straight up, then rotated into place.
+// Index 0 is north, which is drawn as the red triangle instead of a tick.
+// Every 4th tick (E, S, W) is the longer, brighter "cardinal" one.
+const COMPASS_TICKS = Array.from({ length: COMPASS_TICK_COUNT }, (_, i) => i)
+  .filter((i) => i !== 0)
+  .map((i) => {
+    const cardinal = i % 4 === 0;
+    const innerR = cardinal ? 31 : 32;
+    const outerR = cardinal ? 43 : 42.5;
+    const innerHalf = cardinal ? 2.5 : 2;
+    const outerHalf = cardinal ? 3.1 : 2.5;
+    return {
+      key: i,
+      angle: i * (360 / COMPASS_TICK_COUNT),
+      fill: cardinal ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.3)',
+      d: `M ${50 - innerHalf} ${50 - innerR} L ${50 + innerHalf} ${50 - innerR} L ${50 + outerHalf} ${50 - outerR} L ${50 - outerHalf} ${50 - outerR} Z`,
+    };
+  });
+
+const CompassButton = ({ bearingStore, onResetNorth }) => {
+  const [letter, setLetter] = useState(() => getCompassLetter(bearingStore.get()));
+  const [isNorth, setIsNorth] = useState(() => isFacingNorth(bearingStore.get()));
+  // 'shown' | 'hiding' (fading out) | 'hidden' (unmounted)
+  const [phase, setPhase] = useState(() => (isFacingNorth(bearingStore.get()) ? 'hidden' : 'shown'));
+
+  // The ring is moved directly on the DOM from a requestAnimationFrame loop,
+  // not through React. The map only reports its bearing in bursts, so the
+  // loop eases the ring towards the latest value every frame, which keeps
+  // the motion smooth even when the updates arrive unevenly.
+  //   targetAngleRef: where the ring should end up (unwrapped, in degrees)
+  //   angleRef:       where the ring is drawn right now
+  const ringElRef = useRef(null);
+  const targetAngleRef = useRef(-bearingStore.get());
+  const angleRef = useRef(-bearingStore.get());
+  const rafRef = useRef(0);
+  const lastFrameRef = useRef(0);
+
+  const paintRing = useCallback(() => {
+    if (ringElRef.current) ringElRef.current.style.transform = `rotate(${angleRef.current}deg)`;
+  }, []);
+
+  // Callback ref so a freshly mounted ring (after the fade-in) starts at the
+  // right angle straight away.
+  const setRingEl = useCallback((el) => {
+    ringElRef.current = el;
+    if (el) paintRing();
+  }, [paintRing]);
+
+  const tick = useCallback((now) => {
+    const dt = lastFrameRef.current ? Math.min(now - lastFrameRef.current, 64) : 16;
+    lastFrameRef.current = now;
+    const diff = targetAngleRef.current - angleRef.current;
+    if (Math.abs(diff) < 0.05) {
+      angleRef.current = targetAngleRef.current;
+      paintRing();
+      rafRef.current = 0;
+      lastFrameRef.current = 0;
+      return;
+    }
+    // Frame-rate independent easing: covers the same share of the remaining
+    // distance per millisecond whether the device runs at 60 or 120 Hz.
+    angleRef.current += diff * (1 - Math.exp(-dt / COMPASS_SMOOTHING_MS));
+    paintRing();
+    rafRef.current = requestAnimationFrame(tick);
+  }, [paintRing]);
+
+  useEffect(() => {
+    const onBearing = (bearing) => {
+      // The map reports bearing wrapped into a fixed range. Keep the target
+      // unwrapped and always move by the shortest way round, so turning
+      // through south never spins the ring the long way.
+      const delta = ((-bearing - targetAngleRef.current + 540) % 360) - 180;
+      targetAngleRef.current += delta;
+      setLetter(getCompassLetter(bearing));
+      setIsNorth(isFacingNorth(bearing));
+      if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
+    };
+    onBearing(bearingStore.get());
+    const unsubscribe = bearingStore.subscribe(onBearing);
+    return () => {
+      unsubscribe();
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      lastFrameRef.current = 0;
+    };
+  }, [bearingStore, tick]);
+
+  useEffect(() => {
+    if (!isNorth) {
+      setPhase('shown');
+      return undefined;
+    }
+    setPhase((p) => (p === 'hidden' ? p : 'hiding'));
+    const t = setTimeout(() => setPhase('hidden'), COMPASS_FADE_MS);
+    return () => clearTimeout(t);
+  }, [isNorth]);
+
+  if (phase === 'hidden') return null;
+
+  return (
+    <button
+      type="button"
+      className={`sheet-action-button compass-button${phase === 'hiding' ? ' is-hiding' : ''}`}
+      onClick={onResetNorth}
+      aria-label={`Compass, map is facing ${COMPASS_DIRECTION_NAMES[letter]}. Reset north`}
+      title="Reset North"
+      tabIndex={phase === 'hiding' ? -1 : 0}
+    >
+      <svg
+        className="compass-ring"
+        ref={setRingEl}
+        viewBox="0 0 100 100"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        {COMPASS_TICKS.map((t) => (
+          <path key={t.key} d={t.d} fill={t.fill} transform={`rotate(${t.angle} 50 50)`} />
+        ))}
+        {/* North marker: red triangle, tip pointing out towards the rim */}
+        <path
+          d="M 50 5.5 L 55.6 16 L 44.4 16 Z"
+          fill="#ff3b30"
+          stroke="#ff3b30"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="compass-letter" aria-hidden="true">{letter}</span>
+    </button>
+  );
+};
 
 // ── Client-side image compression ──────────────────────────────────────────
 // Stop photos come straight off phone cameras (often several MB each), and
@@ -374,56 +610,6 @@ const AuthForm = ({ onSignIn, onSignUp, onGoogleSignIn, authLoading, googleAuthL
         )}
       </div>
 
-      <button 
-        className={`ios-auth-submit ${authLoading ? 'ios-auth-submit--disabled' : ''}`}
-        onClick={handleSubmit}
-        disabled={authLoading}
-      >
-        {authLoading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
-      </button>
-
-      {isSignUp && (
-        <p className="ios-auth-legal-text">
-          By signing up, you agree to our{' '}
-          <a
-            href="https://gtt.nxnx.tech/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Privacy Policy
-          </a>{' '}
-          and{' '}
-          <a
-            href="https://gtt.nxnx.tech/terms"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Terms &amp; Conditions
-          </a>
-          .
-        </p>
-      )}
-
-      <div className="ios-auth-divider-row">
-        <div className="ios-auth-divider-line" />
-        <span className="ios-auth-divider-label">or</span>
-        <div className="ios-auth-divider-line" />
-      </div>
-
-      <button
-        type="button"
-        className={`ios-google-btn${googleAuthLoading ? ' ios-google-btn--disabled' : ''}`}
-        onClick={onGoogleSignIn}
-        disabled={googleAuthLoading || authLoading}
-      >
-        {googleAuthLoading ? (
-          <span className="ios-google-spinner" />
-        ) : (
-          <GoogleIcon size={18} />
-        )}
-        <span>{googleAuthLoading ? 'Redirecting…' : 'Continue with Google'}</span>
-      </button>
-
       {!isSignUp && (
         <>
           <button
@@ -486,6 +672,56 @@ const AuthForm = ({ onSignIn, onSignUp, onGoogleSignIn, authLoading, googleAuthL
           )}
         </>
       )}
+
+      <button 
+        className={`ios-auth-submit ${authLoading ? 'ios-auth-submit--disabled' : ''}`}
+        onClick={handleSubmit}
+        disabled={authLoading}
+      >
+        {authLoading ? 'Loading...' : (isSignUp ? 'Create Account' : 'Sign In')}
+      </button>
+
+      {isSignUp && (
+        <p className="ios-auth-legal-text">
+          By signing up, you agree to our{' '}
+          <a
+            href="https://gtt.nxnx.tech/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Privacy Policy
+          </a>{' '}
+          and{' '}
+          <a
+            href="https://gtt.nxnx.tech/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Terms &amp; Conditions
+          </a>
+          .
+        </p>
+      )}
+
+      <div className="ios-auth-divider-row">
+        <div className="ios-auth-divider-line" />
+        <span className="ios-auth-divider-label">or</span>
+        <div className="ios-auth-divider-line" />
+      </div>
+
+      <button
+        type="button"
+        className={`ios-google-btn${googleAuthLoading ? ' ios-google-btn--disabled' : ''}`}
+        onClick={onGoogleSignIn}
+        disabled={googleAuthLoading || authLoading}
+      >
+        {googleAuthLoading ? (
+          <span className="ios-google-spinner" />
+        ) : (
+          <GoogleIcon size={18} />
+        )}
+        <span>{googleAuthLoading ? 'Redirecting…' : 'Continue with Google'}</span>
+      </button>
     </div>
   );
 };
@@ -852,11 +1088,13 @@ const GhanaTrotroTransit = () => {
   // top-actions row (so they drag with the sheet) instead of inside the map
   // iframe - these two triggers are the same bump-a-counter pattern as
   // recenterUserTrigger/recenterRouteTrigger above, forwarded into the
-  // iframe by MapComponent. mapBearing is the live map rotation reported
-  // back out, so the compass needle rendered here can track it.
+  // iframe by MapComponent. The live map rotation reported back out goes
+  // into mapBearingStore (not useState: it changes every frame while the
+  // map is being rotated, and re-rendering this whole component that often
+  // made the compass shaky). CompassButton subscribes to the store directly.
   const [resetBearingTrigger, setResetBearingTrigger] = useState(0);
   const [toggleLayerTrigger, setToggleLayerTrigger] = useState(0);
-  const [mapBearing, setMapBearing] = useState(0);
+  const [mapBearingStore] = useState(createBearingStore);
   // Same bump-a-counter pattern, for the Apple-Maps-style "3D" pill button
   // in the sheet's control cluster. is3DActive mirrors the map's actual
   // pitch (MapComponent's iframe starts at pitch:45, i.e. already
@@ -1339,28 +1577,49 @@ const GhanaTrotroTransit = () => {
   // the way to the top of the screen; wider desktop layouts keep a more
   // modest ceiling so it doesn't swallow the whole map. 1023px matches the
   // mobile-vs-"PC" breakpoint used elsewhere in this file (see
-  // .app-title-top-left). Exposed as a function (not just a render-scope
-  // const) because the pointer-move/up handlers are memoized with an empty
-  // dependency array and need to read the *current* viewport at drag time,
-  // not whatever it was on mount.
-  // Peek height is viewport-relative (vh) like the half/full snaps below,
-  // but what it needs to fit is a fixed-px amount of content - just the
-  // drag handle + the quick-search row (everything else is display:none
-  // at peek, see .bottom-sheet.sheet-at-peek in HomeScreen.css) - so this
-  // is sized to hug that content on typical mobile viewport heights
-  // rather than the old 16, which left a visible strip of empty white
-  // space below the search row on most phones.
-  const SHEET_PEEK = 7.5;
-  const getSheetLimits = () => {
-    const full = window.innerWidth <= 1023 ? 85 : 56;
-    const half = (SHEET_PEEK + full) / 2;
-    return { peek: SHEET_PEEK, half, full };
-  };
-  const defaultSnapHeights = () => {
-    const { peek, half, full } = getSheetLimits();
-    return [peek, half, full];
-  };
-  const SNAP_HEIGHTS = defaultSnapHeights(); // vh: peek, half, full
+  // .app-title-top-left). The actual numbers live in computeSheetSnaps()
+  // at the top of this file. The drag handlers below are memoized with an
+  // empty dependency array, so they read the live snaps from
+  // sheetDragRef.current.snapHeights (kept in sync by the layout effect
+  // further down) instead of closing over render-scope values.
+  // Live window size. Sheet heights are px derived from window.innerHeight,
+  // so a resize / rotation / mobile URL-bar collapse re-derives them.
+  const [viewportSize, setViewportSize] = useState(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  }));
+  useEffect(() => {
+    let frame = null;
+    const syncViewport = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        setViewportSize((prev) =>
+          prev.w === window.innerWidth && prev.h === window.innerHeight
+            ? prev
+            : { w: window.innerWidth, h: window.innerHeight }
+        );
+      });
+    };
+    window.addEventListener('resize', syncViewport);
+    window.addEventListener('orientationchange', syncViewport);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      window.removeEventListener('resize', syncViewport);
+      window.removeEventListener('orientationchange', syncViewport);
+    };
+  }, []);
+
+  // Default snaps for this viewport (no route), and the route-aware set
+  // that is actually in effect right now. vh: [peek, half, full].
+  const SNAP_HEIGHTS = useMemo(
+    () => computeSheetSnaps(viewportSize.w, viewportSize.h, null),
+    [viewportSize]
+  );
+  const sheetSnaps = useMemo(
+    () => computeSheetSnaps(viewportSize.w, viewportSize.h, selectedRoute),
+    [viewportSize, selectedRoute]
+  );
   const [sheetSnapIndex, setSheetSnapIndex] = useState(0);
   const [sheetDragHeight, setSheetDragHeight] = useState(SNAP_HEIGHTS[0]);
   const [sheetIsDragging, setSheetIsDragging] = useState(false);
@@ -1375,20 +1634,20 @@ const GhanaTrotroTransit = () => {
   // True once the sheet has been dragged/expanded past its peek height -
   // used to lazy-load Popular Routes / Stops Near You (same trigger the old
   // destination bar used), regardless of which content is currently showing.
-  const isSheetExpanded = sheetDragHeight > SHEET_PEEK + 0.5;
+  const isSheetExpanded = sheetDragHeight > sheetSnaps[0] + 0.5;
 
   // True once the sheet has been dragged (or snapped) at or past its half
   // height - the top-actions row (compass, layer toggle, info, locate,
   // Google Maps, recenter-route) hides past this point so it doesn't
   // crowd whichever content the sheet is showing as it grows taller.
-  const isSheetPastHalfway = sheetDragHeight >= (sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1];
+  const isSheetPastHalfway = sheetDragHeight >= sheetSnaps[1];
 
   // True once the sheet is at (or nearly at) its full snap height - the
   // control cluster (compass, 3D, layer toggle, info, locate, etc.) hides
   // completely past this point since there's no map left above the sheet
   // for it to sit over, same as Apple Maps' own controls disappearing once
   // its sheet covers almost the whole screen.
-  const isSheetNearFull = sheetDragHeight >= (sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2] - 2;
+  const isSheetNearFull = sheetDragHeight >= sheetSnaps[2] - 2;
 
   // Stop detail - shown after picking a stop via the destination content (search,
   // a suggestion, or a Stops Near You card). Images are fetched per-stop.
@@ -1408,36 +1667,43 @@ const GhanaTrotroTransit = () => {
   // closed, otherwise { name, images, index }.
   const [resultLightbox, setResultLightbox] = useState(null);
 
-  // ── Dynamic sheet height based on stop count ──────────────────────────────
-  // Each stop row ~72px, header ~160px, summary cards ~80px, padding ~40px.
-  // The computed height becomes the maximum snap point while a route is
-  // showing. Once the route is cleared, the sheet's snap points fall back
-  // to the standard peek/half/full trio used by every other content type.
-  useEffect(() => {
-    if (!selectedRoute) {
-      sheetDragRef.current.snapHeights = SNAP_HEIGHTS;
+  // ── Keeping the sheet's snap points in sync ───────────────────────────────
+  // Snap points depend on the window size and, while a route is showing, on
+  // its stop count (see computeSheetSnaps). This is the one place that:
+  //   - publishes the current snaps to sheetDragRef for the drag handlers,
+  //   - opens a newly selected route at the mid snap, and
+  //   - after a resize / rotation, keeps the sheet on the same resting
+  //     position (peek stays peek) but at that position's new height.
+  // A layout effect (not a passive one) so the corrected height lands before
+  // paint - otherwise a resize could flash the peek pill in its expanded shape.
+  const sheetSnapIndexRef = useRef(0);
+  const lastSnapRouteRef = useRef(null);
+  useLayoutEffect(() => {
+    sheetSnapIndexRef.current = sheetSnapIndex;
+  }, [sheetSnapIndex]);
+
+  useLayoutEffect(() => {
+    const d = sheetDragRef.current;
+    d.snapHeights = sheetSnaps;
+
+    const routeChanged = lastSnapRouteRef.current !== selectedRoute;
+    lastSnapRouteRef.current = selectedRoute;
+
+    if (selectedRoute && routeChanged) {
+      const midIdx = 1;
+      setSheetDragHeight(sheetSnaps[midIdx]);
+      setSheetSnapIndex(midIdx);
+      d.currentH = sheetSnaps[midIdx];
+      d.startH = sheetSnaps[midIdx];
       return;
     }
-    const stopCount = selectedRoute.is_composite
-      ? (selectedRoute.compositionSegments?.length ?? 0) + 1
-      : (selectedRoute.stops?.length ?? 0);
-    const viewportH = window.innerHeight;
-    const estimatedPx = 160 + 80 + stopCount * 72 + 40;
-    const estimatedVh = Math.round((estimatedPx / viewportH) * 100);
-    // Clamp: min 42 vh, max 88 vh - this is the new "full" snap
-    const fullSnap = Math.min(Math.max(estimatedVh, 42), 88);
-    // Rebuild snap points with the computed full height, keeping the same
-    // peek height every other content type rests at
-    const newSnaps = [SHEET_PEEK, Math.round((SHEET_PEEK + fullSnap) / 2), fullSnap];
-    // Start at the mid snap
-    const midIdx = 1;
-    setSheetDragHeight(newSnaps[midIdx]);
-    setSheetSnapIndex(midIdx);
-    sheetDragRef.current.currentH = newSnaps[midIdx];
-    sheetDragRef.current.startH   = newSnaps[midIdx];
-    // Store dynamic snaps for drag handler
-    sheetDragRef.current.snapHeights = newSnaps;
-  }, [selectedRoute]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (d.active) return; // never fight an in-progress drag
+    const idx = Math.min(sheetSnapIndexRef.current, sheetSnaps.length - 1);
+    setSheetDragHeight(sheetSnaps[idx]);
+    d.currentH = sheetSnaps[idx];
+    d.startH = sheetSnaps[idx];
+  }, [sheetSnaps, selectedRoute]);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -3723,7 +3989,7 @@ const GhanaTrotroTransit = () => {
     if (!d.active) return;
     const snaps = d.snapHeights || SNAP_HEIGHTS;
     const deltaVh = ((d.startY - e.clientY) / window.innerHeight) * 100;
-    const newH = Math.min(snaps[snaps.length - 1] + 4, Math.max(6, d.startH + deltaVh));
+    const newH = Math.min(snaps[snaps.length - 1] + 4, Math.max(snaps[0], d.startH + deltaVh));
     d.currentH = newH;
     setSheetDragHeight(newH);
   }, []);
@@ -3741,6 +4007,16 @@ const GhanaTrotroTransit = () => {
     setSheetDragHeight(snaps[nearestIdx]);
     setSheetSnapIndex(nearestIdx);
     setSheetIsDragging(false);
+
+    // Parked all the way down: there's no room for the on-screen keyboard's
+    // field any more, so drop focus (and with it the keyboard). Focusing a
+    // field is what pulls the sheet back up to full, so this can't loop.
+    if (nearestIdx === 0) {
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && bottomSheetRef.current?.contains(focused)) {
+        focused.blur?.();
+      }
+    }
 
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
   }, []);
@@ -5051,12 +5327,11 @@ const GhanaTrotroTransit = () => {
             onFocus={() => {
               setActiveInput('destination');
               ensureConnected();
-              // Tapping into the field is treated the same as dragging the
-              // handle all the way up - it extends the sheet to full
-              // height so there's room for suggestions/browse content
-              // beneath the keyboard.
-              setSheetSnapIndex(2);
-              setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+              // Tapping into the field pulls the sheet to its half snap -
+              // enough room for suggestions/browse content beneath the
+              // keyboard without taking over the whole screen.
+              setSheetSnapIndex(1);
+              setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleDestBarSearch();
@@ -5238,7 +5513,7 @@ const GhanaTrotroTransit = () => {
             onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
           >
             <Download size={15} color={COLORS.primary} />
-            <span>Download</span>
+            <span>Download the App</span>
           </button>
         </div>
       </div>
@@ -5284,10 +5559,10 @@ const GhanaTrotroTransit = () => {
                 setActiveInput('destination');
                 ensureConnected();
                 // Same as in the destination content: tapping the field
-                // pulls the sheet to full height so suggestions have room
-                // above the keyboard.
-                setSheetSnapIndex(2);
-                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+                // pulls the sheet to its half snap so suggestions have room
+                // above the keyboard without taking over the screen.
+                setSheetSnapIndex(1);
+                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleDestBarSearch();
@@ -5465,8 +5740,11 @@ const GhanaTrotroTransit = () => {
               onFocus={() => {
                 setActiveInput('destination');
                 ensureConnected();
-                setSheetSnapIndex(2);
-                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[2]);
+                // Tapping the field pulls the sheet to its half snap so
+                // suggestions have room above the keyboard without taking
+                // over the screen.
+                setSheetSnapIndex(1);
+                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleDestBarSearch();
@@ -5642,7 +5920,7 @@ const GhanaTrotroTransit = () => {
         resetBearingTrigger={resetBearingTrigger}
         toggleLayerTrigger={toggleLayerTrigger}
         toggle3DTrigger={toggle3DTrigger}
-        onBearingChange={setMapBearing}
+        onBearingChange={mapBearingStore.set}
         onPhotoLightboxChange={setIsPhotoLightboxOpen}
         highlightedStop={highlightedStop}
       />
@@ -5759,14 +6037,15 @@ const GhanaTrotroTransit = () => {
         className={`bottom-sheet${sheetIsDragging ? ' is-dragging' : ''}${!isSheetExpanded ? ' sheet-at-peek' : ''}`}
         ref={bottomSheetRef}
         style={{
-          height: `${sheetDragHeight}vh`,
+          // px, derived from window.innerHeight (see computeSheetSnaps)
+          height: `${Math.round((sheetDragHeight / 100) * viewportSize.h)}px`,
           // The peek <-> expanded pill/sheet shape change (.sheet-at-peek
-          // toggling left/right/bottom/border-radius, see HomeScreen.css)
+          // toggling left/right/bottom/max-width/border-radius, see HomeScreen.css)
           // rides the same transition as height so it reads as the pill
           // actually growing into the sheet, not an abrupt shape swap.
           transition: sheetIsDragging
             ? 'none'
-            : 'height 0.38s cubic-bezier(0.4,0,0.2,1), left 0.38s cubic-bezier(0.4,0,0.2,1), right 0.38s cubic-bezier(0.4,0,0.2,1), bottom 0.38s cubic-bezier(0.4,0,0.2,1), border-radius 0.38s cubic-bezier(0.4,0,0.2,1)',
+            : 'height 0.38s cubic-bezier(0.4,0,0.2,1), left 0.38s cubic-bezier(0.4,0,0.2,1), right 0.38s cubic-bezier(0.4,0,0.2,1), bottom 0.38s cubic-bezier(0.4,0,0.2,1), max-width 0.38s cubic-bezier(0.4,0,0.2,1), border-radius 0.38s cubic-bezier(0.4,0,0.2,1)',
         }}
       >
         {/* ── Control cluster ──────────────────────────────────────────
@@ -5782,29 +6061,16 @@ const GhanaTrotroTransit = () => {
             <div className="sheet-top-actions-group">
               {!isSheetPastHalfway && (
                 <>
-                  {/* Compass / reset north - the map's live bearing now
-                      comes in through MapComponent's onBearingChange, so
-                      the needle keeps rotating even though the button
-                      itself moved out of the map iframe. */}
-                  <button
-                    className="sheet-action-button compass-button"
-                    onClick={() => setResetBearingTrigger((t) => t + 1)}
-                    aria-label="Reset north"
-                    title="Reset North"
-                  >
-                    <svg
-                      viewBox="0 0 40 40"
-                      width="22"
-                      height="22"
-                      xmlns="http://www.w3.org/2000/svg"
-                      style={{ transform: `rotate(${-mapBearing}deg)`, transition: 'transform 0.15s ease-out' }}
-                    >
-                      <path d="M20 4 L23.5 20 L20 18 L16.5 20 Z" fill="#ff453a"/>
-                      <path d="M20 36 L23.5 20 L20 22 L16.5 20 Z" fill="#d1d1d6"/>
-                      <circle cx="20" cy="20" r="3" fill="#ffffff"/>
-                      <circle cx="20" cy="20" r="1.3" fill="#1c1c1e"/>
-                    </svg>
-                  </button>
+                  {/* Compass - shows which way the top of the map is
+                      facing (N / E / S / W) with a ring that rotates to
+                      keep the red marker on true north. Hidden while the
+                      map is facing north, like Apple Maps. The live
+                      bearing comes in through MapComponent's
+                      onBearingChange; tapping resets to north. */}
+                  <CompassButton
+                    bearingStore={mapBearingStore}
+                    onResetNorth={() => setResetBearingTrigger((t) => t + 1)}
+                  />
 
                   {/* 2D/3D tilt toggle - peek-only now; past halfway the
                       combined location/route/layer group below takes its
@@ -6509,7 +6775,7 @@ const GhanaTrotroTransit = () => {
                 )}
               </div>
             )}
-                    <p className="ios-version-text">Version: aaya!</p>
+                    <p className="ios-version-text">Version: yɛnkɔɔ!</p>
 
           </div>
         </div>
@@ -7122,7 +7388,7 @@ const GhanaTrotroTransit = () => {
                 </div>
               </div>
             </div>
-                <h6 class="info-text">Version: aaya!</h6>
+                <h6 class="info-text">Version: yɛnkɔɔ!</h6>
 
           </div>
         </div>

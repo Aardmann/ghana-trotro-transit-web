@@ -186,8 +186,65 @@ body {
   transform: scale(0.94);
 }
 
+/* Compass - dark disc with a rim, a tick ring that rotates with the map
+   (.compass-ring) and a letter that always stays upright (.compass-letter).
+   The button is mounted/unmounted by the CompassButton component in
+   HomeScreen.js: it fades + shrinks in on mount and out via .is-hiding
+   (the 220ms here matches COMPASS_FADE_MS in the JS) when the map is
+   facing north. */
 .compass-button {
-  background: rgba(40, 40, 43, 0.62);
+  position: relative;
+  box-sizing: border-box;
+  padding: 0;
+  background: radial-gradient(circle at 50% 42%, #2b313d 0%, #1b202a 72%, #171b23 100%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(104, 128, 182, 0.55);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32), inset 0 0 6px rgba(0, 0, 0, 0.35);
+  animation: compass-pop-in 0.22s ease-out;
+  transition: transform 0.15s ease, opacity 0.22s ease, background-color 0.15s ease;
+}
+
+.compass-button:hover {
+  background: radial-gradient(circle at 50% 42%, #343b48 0%, #222833 72%, #1c212a 100%);
+}
+
+.compass-button.is-hiding {
+  opacity: 0;
+  transform: scale(0.7);
+  pointer-events: none;
+}
+
+.compass-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  /* Rotated from JS every frame (see CompassButton), so no CSS transition here. */
+  will-change: transform;
+}
+
+.compass-letter {
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  color: #ffffff;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes compass-pop-in {
+  from { opacity: 0; transform: scale(0.7); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compass-button { animation: none; }
 }
 
 /* 2D/3D tilt toggle - a rounded square (not a full circle) with a text
@@ -1241,7 +1298,7 @@ body {
 .ios-list-group {
   background: #FFFFFF;
   border-radius: 20px;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -1370,7 +1427,7 @@ body {
   outline: none;
   background: transparent;
   text-align: right;
-  font-size: 15px;
+  font-size: 16px;
   color: #1C1C1E;
   min-width: 0;
 }
@@ -2568,6 +2625,18 @@ body {
   border-radius: 32px;
 }
 
+/* Large screens: a search capsule as wide as the full 820px sheet reads as a
+   stretched-out bar, so the collapsed pill is narrower (it grows back to
+   820px as the sheet opens - max-width is part of the inline transition in
+   HomeScreen.js), and it sits at the same 24px inset as the desktop control
+   cluster (.sheet-top-actions) so their bottom edges line up. */
+@media (min-width: 1024px) {
+  .bottom-sheet.sheet-at-peek {
+    bottom: 24px;
+    max-width: 600px;
+  }
+}
+
 @keyframes sheetSlideUp {
   from { transform: translateY(100%); opacity: 0.7; }
   to   { transform: translateY(0);    opacity: 1;   }
@@ -2587,6 +2656,35 @@ body {
   border-radius: 32px;
   /* subtle top accent line */
   border-top: 2px solid rgba(0, 0, 0, 0);
+  /* Anchors the invisible hit-area extension below (::before). */
+  position: relative;
+  /* How far the grab zone reaches past the visible handle box. The grabber
+     is only 5px tall, so on its own it's a very hard target for a thumb.
+     Up = over the map just above the sheet; down = into the gap before the
+     first row of content, so it stays small enough not to steal taps from
+     that row. */
+  --handle-slop-up: 24px;
+  --handle-slop-down: 3px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Invisible tap slop around the grabber. It belongs to the handle, so a
+   press anywhere in it starts the same drag (pointer events on a pseudo-
+   element are dispatched to its owner). Its width is capped and inset
+   from both sides: the right inset keeps it clear of the control cluster
+   (compass / 3D / layers) that sits just above the sheet on phones, and
+   the handle's own full-width strip below still covers the whole top
+   edge. Purely a hit area - it takes no space and changes no layout. */
+.sheet-drag-handle::before {
+  content: '';
+  position: absolute;
+  top: calc(-1 * var(--handle-slop-up));
+  bottom: calc(-1 * var(--handle-slop-down));
+  left: 50%;
+  width: min(280px, calc(100% - 132px));
+  transform: translateX(-50%);
 }
 
 .sheet-drag-handle:active,
@@ -2834,6 +2932,150 @@ body {
   display: none;
 }
 
+/* ══════════════════════════════════════════════════════════
+   PEEK GEOMETRY + NO SCROLLING
+   Sheet dragged all the way down. SHEET_PEEK_PX in HomeScreen.js (76px)
+   is exactly the sum of what is laid out here, at every screen size:
+
+       6px  breathing room above the grabber
+       7px  grabber (5px pill + 2px transparent border)
+      63px  content area, holding ONE 48px row centred in it
+            (7.5px above and below)
+
+   Whatever the sheet is showing (destination search, stop detail, stop
+   search results, the route search form, a route or its info page), the
+   collapsed sheet is that content's single top row - nothing taller, so
+   nothing is clipped mid-element - and nothing inside can scroll.
+══════════════════════════════════════════════════════════ */
+.bottom-sheet.sheet-at-peek .sheet-drag-handle {
+  padding-top: 6px;
+  /* 13px grabber zone + 7.5px above the row: 6px of slop below the handle
+     box still leaves the row untouched. */
+  --handle-slop-down: 6px;
+}
+
+/* The desktop rule gives the content 20px side padding + 8px bottom padding;
+   at peek every row supplies its own 10px inset instead, so the collapsed
+   pill looks identical on phones and desktops. */
+.bottom-sheet.sheet-at-peek .bottom-sheet-content {
+  padding: 0;
+  justify-content: center;
+}
+
+/* Destination search (ambient view). Drop the 15px margin that separates
+   the row from the scrolling content it sits above - that content is hidden
+   here, and the margin would push the row off-centre. */
+.bottom-sheet.sheet-at-peek .destination-bar-content {
+  flex: 0 0 auto;
+  padding: 0 10px;
+}
+
+.bottom-sheet.sheet-at-peek .quick-search-row {
+  margin-bottom: 0;
+}
+
+/* Stop detail / stop search results: same inset as the destination row. */
+.bottom-sheet.sheet-at-peek .stop-detail-search-row {
+  padding: 0 10px;
+}
+
+/* Route search form: the back button and the start field share one row
+   (title, swap button, destination field and Find Routes are hidden by the
+   rules above). */
+.bottom-sheet.sheet-at-peek .search-section {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  padding: 0 10px;
+}
+
+.bottom-sheet.sheet-at-peek .search-form-topbar {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.bottom-sheet.sheet-at-peek .search-back-button {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+}
+
+.bottom-sheet.sheet-at-peek .search-form-title {
+  display: none;
+}
+
+.bottom-sheet.sheet-at-peek .search-section .scroll-view {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bottom-sheet.sheet-at-peek .search-card {
+  margin: 0;
+  padding: 0;
+}
+
+.bottom-sheet.sheet-at-peek .search-card .input-row {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+.bottom-sheet.sheet-at-peek .search-card .input-container-start {
+  flex: 1 1 100%;
+  width: 100%;
+  height: 48px;
+  margin: 0;
+}
+
+/* Route details / route info: header only, as a single 48px row with the
+   route name vertically centred beside its buttons. The subtitle and the
+   route-info page's redundant close button drop out. */
+.bottom-sheet.sheet-at-peek .route-swipe-wrapper {
+  flex: 0 0 auto;
+}
+
+.bottom-sheet.sheet-at-peek .route-details,
+.bottom-sheet.sheet-at-peek .route-info {
+  height: auto;
+  padding: 0;
+}
+
+.bottom-sheet.sheet-at-peek .route-details .sheet-header,
+.bottom-sheet.sheet-at-peek .route-info .sheet-header {
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  margin: 0;
+  padding: 0 10px 0 16px;
+  background: transparent;
+}
+
+.bottom-sheet.sheet-at-peek .sheet-header .route-name {
+  margin: 0;
+}
+
+.bottom-sheet.sheet-at-peek .sheet-header .route-subtitle,
+.bottom-sheet.sheet-at-peek .route-info .header-buttons .close-button {
+  display: none;
+}
+
+/* No scrolling at peek, by any route. Several inner containers are scrollers
+   in the expanded sheet (.route-details / .route-info / .scroll-view are all
+   overflow-y:auto, and each would scroll their tucked-away padding here), so
+   this pins every descendant rather than naming them one by one - a scroller
+   added later can't leak through. touch-action + overscroll-behavior stop a
+   swipe on the collapsed bar from scrolling, or pulling-to-refresh, the page
+   behind it (taps and typing are unaffected; the grabber above keeps its own
+   touch-action: none for dragging). */
+.bottom-sheet.sheet-at-peek .bottom-sheet-content,
+.bottom-sheet.sheet-at-peek .bottom-sheet-content *:not(input) {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 .destination-bar-explore {
   display: flex;
   flex-direction: column;
@@ -3030,19 +3272,14 @@ body {
 
 /* ── Peek height for the stop detail view AND the search-results list -
    the search row above becomes the whole (collapsed) sheet instead of the
-   summary/count row, centered as a compact group rather than stretched
-   edge-to-edge. Both rules need to win over the general .sheet-at-peek
-   group further up this file (same selector specificity -
-   .bottom-sheet.sheet-at-peek plus one class - so they're placed after it
-   in source order). ── */
+   summary/count row. It's the same full-width [back] [field] [search] row
+   the destination view collapses to (see PEEK GEOMETRY further up), so the
+   collapsed pill doesn't change shape as you move between views. This rule
+   needs to win over the general .sheet-at-peek group further up this file
+   (same selector specificity - .bottom-sheet.sheet-at-peek plus one class -
+   so it's placed after it in source order). ── */
 .bottom-sheet.sheet-at-peek .stop-detail-single-search-row {
   display: flex;
-  justify-content: center;
-  padding-top: 6px;
-}
-
-.bottom-sheet.sheet-at-peek .stop-detail-single-search-row .input-container {
-  flex: 0 1 340px;
 }
 
 .bottom-sheet.sheet-at-peek .stop-detail-single-summary-row {
@@ -3357,7 +3594,7 @@ body {
 
 .input {
   flex: 1;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--text-color);
   border: none;
   background: transparent;
@@ -5894,7 +6131,7 @@ body, #root {
   border: 1.5px solid #E2E8F0;
   border-radius: 22px;
   padding: 12px 14px;
-  font-size: 14px;
+  font-size: 16px;
   color: #1E293B;
   background: #FFFFFF;
   resize: none;
@@ -6162,7 +6399,7 @@ body, #root {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 15px;
+  font-size: 16px;
   color: #1C1C1E;
   min-width: 0;
 }
@@ -6209,9 +6446,9 @@ body, #root {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  text-align: center;
+  text-align: end;
   width: 100%;
-  padding: 6px 0 2px;
+  padding: 6px 5px 2px;
 }
 
 .ios-auth-forgot:hover {
@@ -7179,7 +7416,7 @@ body, #root {
   border: 1.5px solid #E2E8F0;
   border-radius: 24px;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: 16px;
   color: #1E293B;
   background: #FFFFFF;
   margin-bottom: 18px;
@@ -7313,7 +7550,7 @@ body, #root {
   border: 1.5px solid #E2E8F0;
   border-radius: 24px;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: 16px;
   color: #1E293B;
   background: #FFFFFF;
   margin-bottom: 18px;
@@ -7333,7 +7570,7 @@ body, #root {
   border: 1.5px solid #E2E8F0;
   border-radius: 24px;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: 16px;
   color: #1E293B;
   background: #FFFFFF;
   margin-bottom: 20px;

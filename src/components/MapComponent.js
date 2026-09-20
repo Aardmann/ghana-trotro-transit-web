@@ -564,6 +564,18 @@ const MapComponent = React.memo(({
       cursor:pointer;touch-action:none;
       transition:opacity 0.35s ease-out,width 0.2s ease,height 0.2s ease;
     }
+    /* Invisible tap-slop: the visible dot stays 11px, but taps landing
+       anywhere in this centered 40px zone still register - a pseudo-element
+       doesn't add to el's own box, so it doesn't affect MapLibre's anchor
+       centering, and (like every other generated-content box) a tap on it
+       is dispatched as a tap on .nearby-stop-dot itself. 40px comfortably
+       covers Apple's 44pt / Material's 48dp minimum touch target guidance
+       even at photo (22px) or highlighted (28px) size. */
+    .nearby-stop-dot::after{
+      content:'';position:absolute;top:50%;left:50%;
+      width:40px;height:40px;transform:translate(-50%,-50%);
+      background:transparent;
+    }
     .nearby-stop-dot--photo{
       width:22px;height:22px;
       box-shadow:0 0 0 2px rgba(255,255,255,0.85),0 2px 6px rgba(0,0,0,0.45);

@@ -18,7 +18,7 @@ const COOKIE_MAX_AGE_DAYS = 365;
 // newly-approved stop in an area you've already cached can take up to 24
 // hours to show up on this device unless the cache is cleared or the move
 // threshold is crossed. That's a deliberate tradeoff for fewer DB calls.
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks
 
 const NEARBY_STOPS_CACHE_KEY = 'gtt_nearby_stops_cache';
 const NEARBY_RADIUS_KM = 2;
