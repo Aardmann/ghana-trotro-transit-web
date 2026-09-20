@@ -9,7 +9,7 @@ import {
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
   Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
-  Menu, TrendingUp, Compass, MessageCircle, Bell
+  Menu, TrendingUp, Compass, MessageCircle, Bell, Sun, Moon
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -336,6 +336,98 @@ const CompassButton = ({ bearingStore, onResetNorth }) => {
         />
       </svg>
       <span className="compass-letter" aria-hidden="true">{letter}</span>
+    </button>
+  );
+};
+
+// ── Weather pill (top centre) ──────────────────────────────────────────────
+// A small frosted pill with a sun (daytime) or moon (night) and the current
+// temperature. Tapping it flips between Celsius and Fahrenheit, and the
+// choice is remembered. Data comes from Open-Meteo (free, no API key): its
+// `is_day` flag already accounts for sunrise and sunset at that location,
+// so the icon flips at the right time without any date maths here.
+const WEATHER_REFRESH_MS = 15 * 60 * 1000;
+const TEMP_UNIT_STORAGE_KEY = 'gtt_temperature_unit';
+
+const readStoredTempUnit = () => {
+  try {
+    return window.localStorage.getItem(TEMP_UNIT_STORAGE_KEY) === 'F' ? 'F' : 'C';
+  } catch (e) {
+    return 'C';
+  }
+};
+
+const WeatherPill = ({ lat, lng, hidden = false }) => {
+  const [weather, setWeather] = useState(null); // { tempC, isDay }
+  const [unit, setUnit] = useState(readStoredTempUnit);
+
+  // Rounded to 2 decimals (about 1 km) so a tiny GPS wobble doesn't trigger
+  // a new request; weather does not change over that distance anyway.
+  const latKey = Number.isFinite(lat) ? lat.toFixed(2) : null;
+  const lngKey = Number.isFinite(lng) ? lng.toFixed(2) : null;
+
+  useEffect(() => {
+    if (latKey === null || lngKey === null) return undefined;
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${latKey}&longitude=${lngKey}&current=temperature_2m,is_day&timezone=auto`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const current = data && data.current;
+        if (!cancelled && current && typeof current.temperature_2m === 'number') {
+          setWeather({ tempC: current.temperature_2m, isDay: current.is_day === 1 });
+        }
+      } catch (e) {
+        // Offline or the service is down: keep showing the last reading, or
+        // nothing at all if we never got one. Weather is a nice-to-have.
+      }
+    };
+
+    load();
+    const id = setInterval(load, WEATHER_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [latKey, lngKey]);
+
+  const toggleUnit = () => {
+    const next = unit === 'C' ? 'F' : 'C';
+    setUnit(next);
+    try {
+      window.localStorage.setItem(TEMP_UNIT_STORAGE_KEY, next);
+    } catch (e) {
+      // Storage blocked: the choice just lasts for this visit.
+    }
+  };
+
+  if (!weather || hidden) return null;
+
+  const shown = Math.round(unit === 'F' ? (weather.tempC * 9) / 5 + 32 : weather.tempC);
+  const unitName = unit === 'F' ? 'Fahrenheit' : 'Celsius';
+  const otherUnitName = unit === 'F' ? 'Celsius' : 'Fahrenheit';
+
+  return (
+    <button
+      type="button"
+      className="weather-pill"
+      onClick={toggleUnit}
+      aria-label={`${weather.isDay ? 'Daytime' : 'Night'}, ${shown} degrees ${unitName}. Tap to switch to ${otherUnitName}`}
+      title={`Tap for ${otherUnitName} (weather by Open-Meteo)`}
+    >
+      {weather.isDay ? (
+        <Sun size={18} color="#ffd60a" fill="#ffd60a" aria-hidden="true" />
+      ) : (
+        <Moon size={17} color="#dbe4ff" fill="#dbe4ff" aria-hidden="true" />
+      )}
+      <span className="weather-pill-temp">
+        {shown}
+        <span className="weather-pill-unit">°{unit}</span>
+      </span>
     </button>
   );
 };
@@ -5931,6 +6023,17 @@ const GhanaTrotroTransit = () => {
       <div className="app-title-top-left">
         <h4>Ghana Trotro Transit</h4>
       </div>
+
+      {/* Weather - sun or moon plus the temperature, top centre. Uses the
+          user's position when we have it, otherwise the map's default
+          centre. Kept mounted (just hidden) while the photo lightbox or the
+          location nudge banner is up, so it doesn't refetch each time. The
+          banner sits in the same spot, hence hiding it there. */}
+      <WeatherPill
+        lat={userLocation ? userLocation.lat : MAP_CONFIG.center[0]}
+        lng={userLocation ? userLocation.lng : MAP_CONFIG.center[1]}
+        hidden={isPhotoLightboxOpen || showLocationPermissionBanner}
+      />
 
       {/* Location Permission Nudge - shown when the user's location marker
           still isn't on the map (never granted, denied, or unavailable),

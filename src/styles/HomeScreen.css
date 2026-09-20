@@ -401,6 +401,78 @@ body {
   }
 }
 
+/* ── Weather pill (top centre) ────────────────────────────────────────
+   Same frosted dark look as the sheet control cluster. Centred with
+   auto margins rather than a translate so hover/press can scale it
+   freely. Lines up with the profile button's vertical centre (which
+   sits lower on phones, see the max-width: 768px block). */
+.weather-pill {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 8px;
+  background: rgba(40, 40, 43, 0.62);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 0.5px solid rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  animation: weather-pill-in 0.25s ease-out;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.weather-pill:hover {
+  transform: scale(1.04);
+  background: rgba(58, 58, 62, 0.72);
+}
+
+.weather-pill:active {
+  transform: scale(0.95);
+}
+
+.weather-pill-temp {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1px;
+}
+
+.weather-pill-unit {
+  margin-left: 1px;
+  opacity: 0.72;
+  font-weight: 500;
+}
+
+@keyframes weather-pill-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 768px) {
+  .weather-pill {
+    top: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weather-pill { animation: none; }
+}
+
 /* ── Location permission nudge banner ─────────────────────────────────
    A slim, dismissible bar near the top of the screen encouraging the
    user to enable location when their marker isn't showing on the map. */
