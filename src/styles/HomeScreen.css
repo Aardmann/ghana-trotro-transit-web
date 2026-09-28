@@ -7882,3 +7882,29 @@ body, #root {
     max-width: 320px;
   }
 }
+
+/* ── Save (bookmark) button next to Share in route details ── */
+.share-inline-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.save-inline-button--saved {
+  background: #EDE9FE;
+  border-color: #6b21a8;
+}
+
+.save-inline-button--saved:hover {
+  background: #DDD6FE;
+}
+
+/* Four items now share the "Route Stops" row - let them wrap on narrow screens */
+.route-details .stops-title {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.route-details .stops-title-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}

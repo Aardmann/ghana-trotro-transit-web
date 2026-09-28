@@ -9,7 +9,7 @@ import {
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
   Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
-  Menu, TrendingUp, Compass, MessageCircle, Bell, Sun, Moon
+  Menu, TrendingUp, Compass, MessageCircle, Bell, Sun, Moon, Bookmark
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -433,6 +433,75 @@ const WeatherPill = ({ lat, lng, hidden = false }) => {
 };
 
 // ── Client-side image compression ──────────────────────────────────────────
+// users.saved_routes is a jsonb array. We write plain route-id strings, but
+// tolerate `{ id }` / `{ route_id }` objects when reading so an older or
+// differently-shaped entry never breaks the list.
+function getSavedRouteId(entry) {
+  if (typeof entry === 'string') return entry;
+  return entry?.id ?? entry?.route_id ?? null;
+}
+
+// ── Duplicate-stop detection ─────────────────────────────────────────────
+// Used by both "Add a Stop" and "Update a Stop" so contributors can't create
+// (or rename/move a stop into) something that's already in the database.
+//  - Same name (case/spacing/accent/punctuation-insensitive) within
+//    DUPLICATE_NAME_RADIUS_M is treated as a true duplicate → blocked.
+//    Trotro stops often share names across town, so name alone isn't enough.
+//  - Any differently-named stop within DUPLICATE_PROXIMITY_RADIUS_M is only
+//    a soft warning → the contributor can confirm and continue.
+// Only approved, public stops are checked (same visibility the rest of the
+// web app has under RLS). If the lookup itself fails we fail open so a
+// flaky connection never hard-blocks a contribution.
+const DUPLICATE_NAME_RADIUS_M = 500;
+const DUPLICATE_PROXIMITY_RADIUS_M = 25;
+
+function normalizeStopName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+async function findDuplicateStop({ name, lat, lng, excludeId = null }) {
+  try {
+    const maxM = Math.max(DUPLICATE_NAME_RADIUS_M, DUPLICATE_PROXIMITY_RADIUS_M);
+    const latDelta = maxM / 1000 / 111;
+    const lngDelta = maxM / 1000 / (111 * Math.cos((lat * Math.PI) / 180));
+
+    let query = supabase
+      .from('stops')
+      .select('id, name, latitude, longitude')
+      .eq('approved', true)
+      .eq('user_location_to_create', false)
+      .gte('latitude', lat - latDelta)
+      .lte('latitude', lat + latDelta)
+      .gte('longitude', lng - lngDelta)
+      .lte('longitude', lng + lngDelta);
+    if (excludeId) query = query.neq('id', excludeId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const target = normalizeStopName(name);
+    let sameName = null;
+    let tooClose = null;
+    for (const s of data || []) {
+      const distanceM = haversineKm(lat, lng, parseFloat(s.latitude), parseFloat(s.longitude)) * 1000;
+      if (normalizeStopName(s.name) === target && distanceM <= DUPLICATE_NAME_RADIUS_M) {
+        if (!sameName || distanceM < sameName.distanceM) sameName = { ...s, distanceM };
+      } else if (distanceM <= DUPLICATE_PROXIMITY_RADIUS_M) {
+        if (!tooClose || distanceM < tooClose.distanceM) tooClose = { ...s, distanceM };
+      }
+    }
+    return { sameName, tooClose };
+  } catch (err) {
+    console.warn('Duplicate stop check failed, continuing without it:', err);
+    return { sameName: null, tooClose: null };
+  }
+}
+
 // Stop photos come straight off phone cameras (often several MB each), and
 // there's no server-side resizing step - whatever gets uploaded here is what
 // sits in Supabase Storage and gets downloaded by every user who later views
@@ -1562,6 +1631,18 @@ const GhanaTrotroTransit = () => {
   const [updateStopImages, setUpdateStopImages] = useState([]); // File[]
   const [updateStopSubmitting, setUpdateStopSubmitting] = useState(false);
   const [updateStopSuccess, setUpdateStopSuccess] = useState(false);
+
+  // Duplicate-stop dialog shown by Add/Update Stop when findDuplicateStop hits.
+  // { flow: 'add' | 'update', kind: 'exists' | 'nearby', name, distanceM }
+  //  - 'exists': same-name stop already nearby → hard block, Close only
+  //  - 'nearby': differently-named stop right there → user can continue anyway
+  const [duplicateStopDialog, setDuplicateStopDialog] = useState(null);
+
+  // ── Saved routes (users.saved_routes) + the Search History modal's tabs ──
+  const [historyModalTab, setHistoryModalTab] = useState('history'); // 'history' | 'saved'
+  const [savedRoutesData, setSavedRoutesData] = useState([]); // display rows for the Saved tab
+  const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
+  const [savingRouteId, setSavingRouteId] = useState(null); // route id currently being saved/unsaved
 
   // ── Donate (Paystack) ─────────────────────────────────────────────────
   const [showDonateModal, setShowDonateModal] = useState(false);
@@ -2866,7 +2947,9 @@ const GhanaTrotroTransit = () => {
   // (type: 'update') for a moderator to review - the stop itself isn't
   // changed until it's approved. Any attached photos still go through the
   // normal stop_images pending-approval flow.
-  const handleSubmitStopUpdate = useCallback(async () => {
+  const handleSubmitStopUpdate = useCallback(async (opts) => {
+    // Set by the duplicate dialog's "Submit Anyway" button (see handleSubmitNewStop).
+    const skipProximityConfirm = opts?.skipProximityConfirm === true;
     if (!pendingUpdateStop || !pendingUpdateStop.id || !updateStopName.trim()) return;
     setUpdateStopSubmitting(true);
     try {
@@ -2891,6 +2974,27 @@ const GhanaTrotroTransit = () => {
         alert('Change the name or location, or add a photo, before submitting.');
         setUpdateStopSubmitting(false);
         return;
+      }
+
+      // If the name or location is changing, make sure it wouldn't collide
+      // with a different stop that's already in the database.
+      const locationChanged = payload.latitude !== undefined;
+      if (payload.name !== undefined || locationChanged) {
+        const finalCoords = updateStopCoords || { lat: pendingUpdateStop.lat, lng: pendingUpdateStop.lng };
+        const { sameName, tooClose } = await findDuplicateStop({
+          name: updateStopName.trim(),
+          lat: finalCoords.lat,
+          lng: finalCoords.lng,
+          excludeId: pendingUpdateStop.id,
+        });
+        if (sameName) {
+          setDuplicateStopDialog({ flow: 'update', kind: 'exists', name: sameName.name, distanceM: Math.round(sameName.distanceM) });
+          return;
+        }
+        if (locationChanged && tooClose && !skipProximityConfirm) {
+          setDuplicateStopDialog({ flow: 'update', kind: 'nearby', name: tooClose.name, distanceM: Math.round(tooClose.distanceM) });
+          return;
+        }
       }
 
       if (Object.keys(payload).length > 0) {
@@ -2969,10 +3073,28 @@ const GhanaTrotroTransit = () => {
 
   // Submits a volunteer-added stop (and any photos) - unapproved until a
   // moderator reviews it, exactly like the earner-submitted stops flow.
-  const handleSubmitNewStop = useCallback(async () => {
+  const handleSubmitNewStop = useCallback(async (opts) => {
+    // Set by the duplicate dialog's "Add Anyway" button; when used as an
+    // onClick handler `opts` is the click event, which never has this flag.
+    const skipProximityConfirm = opts?.skipProximityConfirm === true;
     if (!pendingStopCoords || !newStopName.trim()) return;
     setAddStopSubmitting(true);
     try {
+      // Don't add a stop that's already in the database.
+      const { sameName, tooClose } = await findDuplicateStop({
+        name: newStopName.trim(),
+        lat: pendingStopCoords.lat,
+        lng: pendingStopCoords.lng,
+      });
+      if (sameName) {
+        setDuplicateStopDialog({ flow: 'add', kind: 'exists', name: sameName.name, distanceM: Math.round(sameName.distanceM) });
+        return;
+      }
+      if (tooClose && !skipProximityConfirm) {
+        setDuplicateStopDialog({ flow: 'add', kind: 'nearby', name: tooClose.name, distanceM: Math.round(tooClose.distanceM) });
+        return;
+      }
+
       // Generate the id client-side so we can attach photos to it without
       // needing to select the (still-unapproved) row back under RLS.
       const newStopId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -3026,6 +3148,119 @@ const GhanaTrotroTransit = () => {
       setAddStopSubmitting(false);
     }
   }, [pendingStopCoords, newStopName, newStopImages, user]);
+
+  const closeDuplicateStopDialog = useCallback(() => setDuplicateStopDialog(null), []);
+
+  // "Add Anyway" / "Submit Anyway" on the 'nearby' variant: re-run the original
+  // submit, skipping only the soft proximity prompt (same-name is never skippable).
+  const confirmDuplicateStopDialog = useCallback(() => {
+    const flow = duplicateStopDialog?.flow;
+    setDuplicateStopDialog(null);
+    if (flow === 'add') handleSubmitNewStop({ skipProximityConfirm: true });
+    else if (flow === 'update') handleSubmitStopUpdate({ skipProximityConfirm: true });
+  }, [duplicateStopDialog, handleSubmitNewStop, handleSubmitStopUpdate]);
+
+  // ── Saved routes ─────────────────────────────────────────────────────
+  const savedRouteIds = useMemo(() => {
+    const list = Array.isArray(userProfile?.saved_routes) ? userProfile.saved_routes : [];
+    return list.map(getSavedRouteId).filter(Boolean);
+  }, [userProfile?.saved_routes]);
+
+  // Toggles a route in users.saved_routes. Guests are sent to the sign-in
+  // panel instead. The latest saved_routes is re-read right before writing so
+  // a save made elsewhere (another tab, the mobile app) isn't overwritten.
+  const handleToggleSaveRoute = useCallback(async (routeOrId) => {
+    const routeId = typeof routeOrId === 'string' ? routeOrId : routeOrId?.id;
+    if (!routeId) return;
+    if (!user?.id) {
+      setShowProfileModal(true);
+      return;
+    }
+    setSavingRouteId(routeId);
+    try {
+      const { data: row, error: readError } = await supabase
+        .from('users')
+        .select('saved_routes')
+        .eq('id', user.id)
+        .single();
+      if (readError) throw readError;
+
+      const current = Array.isArray(row?.saved_routes) ? row.saved_routes : [];
+      const alreadySaved = current.some((entry) => getSavedRouteId(entry) === routeId);
+      const next = alreadySaved
+        ? current.filter((entry) => getSavedRouteId(entry) !== routeId)
+        : [...current, routeId];
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ saved_routes: next })
+        .eq('id', user.id);
+      if (updateError) throw updateError;
+
+      setUserProfile((prev) => (prev ? { ...prev, saved_routes: next } : prev));
+    } catch (error) {
+      console.error('Error updating saved routes:', error);
+      alert('Error: ' + (error.message || 'Could not update your saved routes. Please try again.'));
+    } finally {
+      setSavingRouteId(null);
+    }
+  }, [user]);
+
+  // Loads display info for the Saved tab whenever it's showing (or the saved
+  // ids change while it is). Newest save first.
+  useEffect(() => {
+    if (!showSearchHistoryModal || historyModalTab !== 'saved') return;
+    if (savedRouteIds.length === 0) {
+      setSavedRoutesData([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setSavedRoutesLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('routes')
+          .select('id, name, total_fare, total_distance, vehicle_type, route_stops(stop_order, stops(name))')
+          .in('id', savedRouteIds);
+        if (error) throw error;
+        if (cancelled) return;
+
+        const byId = new Map((data || []).map((r) => [r.id, r]));
+        const rows = [...savedRouteIds].reverse()
+          .map((id) => byId.get(id))
+          .filter(Boolean) // routes that have since been deleted just drop out
+          .map((r) => {
+            const ordered = [...(r.route_stops || [])].sort((a, b) => a.stop_order - b.stop_order);
+            return {
+              id: r.id,
+              name: r.name,
+              fare: r.total_fare,
+              distance: r.total_distance,
+              startName: ordered[0]?.stops?.name || null,
+              endName: ordered.length > 1 ? ordered[ordered.length - 1]?.stops?.name || null : null,
+            };
+          });
+        setSavedRoutesData(rows);
+      } catch (error) {
+        console.error('Error loading saved routes:', error);
+      } finally {
+        if (!cancelled) setSavedRoutesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showSearchHistoryModal, historyModalTab, savedRouteIds]);
+
+  // Unsaving from the Saved tab hides the row immediately, without waiting
+  // for the refetch above.
+  const savedRoutesList = useMemo(
+    () => savedRoutesData.filter((r) => savedRouteIds.includes(r.id)),
+    [savedRoutesData, savedRouteIds]
+  );
+
+  // Always reopen the Search History modal on its History tab.
+  useEffect(() => {
+    if (!showSearchHistoryModal) setHistoryModalTab('history');
+  }, [showSearchHistoryModal]);
 
   // ── Donate (Paystack Inline)
   const PAYSTACK_PUBLIC_KEY = "pk_live_be7ac128a98aa85c216b52f64f1ad5523bd3193e";
@@ -3888,6 +4123,13 @@ const GhanaTrotroTransit = () => {
       return null;
     }
   }, [fetchRouteInfo]);
+
+  // Tapping a row in the Saved tab: close the modal and open that exact route.
+  const handleOpenSavedRoute = useCallback(async (routeId) => {
+    setShowSearchHistoryModal(false);
+    const opened = await fetchRouteById(routeId);
+    if (!opened) alert('Could not open this route. It may have been removed.');
+  }, [fetchRouteById]);
 
   // Selecting a route from the drawer mirrors the normal search-result
   // selection flow: it becomes the active route on the map and its details
@@ -5026,6 +5268,19 @@ const GhanaTrotroTransit = () => {
                   )}
                 </button>
                 <button
+                  className={`share-inline-button save-inline-button${savedRouteIds.includes(selectedRoute.id) ? ' save-inline-button--saved' : ''}`}
+                  onClick={() => handleToggleSaveRoute(selectedRoute)}
+                  disabled={savingRouteId === selectedRoute.id}
+                  title={savedRouteIds.includes(selectedRoute.id) ? 'Remove from saved routes' : 'Save this route'}
+                >
+                  <Bookmark
+                    size={13}
+                    color="#000000"
+                    fill={savedRouteIds.includes(selectedRoute.id) ? '#000000' : 'none'}
+                  />
+                  <span>{savedRouteIds.includes(selectedRoute.id) ? 'Saved' : 'Save'}</span>
+                </button>
+                <button
                   className="report-inline-button"
                   onClick={() => { setIsGeneralReport(false); setShowReportModal(true); }}
                   title="Report an issue"
@@ -5192,7 +5447,7 @@ const GhanaTrotroTransit = () => {
         </div>
       )}
     </div>
-  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime, setShowReportModal, setIsGeneralReport, handleShareRoute, shareCopied]);
+  ), [selectedRoute, routes, resetSearch, closeBottomSheet, showSwipeIndicator, isRealtimeConnected, lastUpdateTime, setShowReportModal, setIsGeneralReport, handleShareRoute, shareCopied, savedRouteIds, savingRouteId, handleToggleSaveRoute]);
 
   // Render route info with realtime indicator
   const renderRouteInfo = useCallback(() => (
@@ -7590,7 +7845,23 @@ const GhanaTrotroTransit = () => {
             </div>
 
             <div className="modal-content ios-history-content">
-              {searchHistory.length === 0 ? (
+              <div className="ios-auth-tabs">
+                <button
+                  className={`ios-auth-tab ${historyModalTab === 'history' ? 'ios-auth-tab--active' : ''}`}
+                  onClick={() => setHistoryModalTab('history')}
+                >
+                  History
+                </button>
+                <button
+                  className={`ios-auth-tab ${historyModalTab === 'saved' ? 'ios-auth-tab--active' : ''}`}
+                  onClick={() => setHistoryModalTab('saved')}
+                >
+                  Saved{savedRouteIds.length > 0 ? ` (${savedRouteIds.length})` : ''}
+                </button>
+              </div>
+
+              {historyModalTab === 'history' ? (
+              searchHistory.length === 0 ? (
                 <div className="ios-empty-state">
                   <div className="ios-empty-state-icon">
                     <History size={26} color="#8E8E93" />
@@ -7654,6 +7925,72 @@ const GhanaTrotroTransit = () => {
                     ))}
                   </div>
                 </>
+              )
+              ) : !user ? (
+                <div className="ios-empty-state">
+                  <div className="ios-empty-state-icon">
+                    <Bookmark size={26} color="#8E8E93" />
+                  </div>
+                  <h3 className="ios-empty-state-title">Sign In to Save Routes</h3>
+                  <p className="ios-empty-state-text">
+                    Sign in to save routes and find them here.
+                  </p>
+                </div>
+              ) : savedRoutesLoading && savedRoutesList.length === 0 ? (
+                <div className="ios-empty-state">
+                  <p className="ios-empty-state-text">Loading saved routes...</p>
+                </div>
+              ) : savedRoutesList.length === 0 ? (
+                <div className="ios-empty-state">
+                  <div className="ios-empty-state-icon">
+                    <Bookmark size={26} color="#8E8E93" />
+                  </div>
+                  <h3 className="ios-empty-state-title">No Saved Routes</h3>
+                  <p className="ios-empty-state-text">
+                    Tap Save on any route and it will show up here.
+                  </p>
+                </div>
+              ) : (
+                <div className="ios-list-group">
+                  {savedRoutesList.map((r, idx) => (
+                    <React.Fragment key={r.id}>
+                      <div className="ios-history-row">
+                        <button
+                          className="ios-history-row-main"
+                          onClick={() => handleOpenSavedRoute(r.id)}
+                        >
+                          <span className="ios-row-icon ios-row-icon--blue">
+                            <Bookmark size={15} color="#FFFFFF" />
+                          </span>
+                          <span className="ios-history-text">
+                            <span className="ios-history-route">{r.name}</span>
+                            <span className="ios-history-date">
+                              {[
+                                r.startName && r.endName ? `${r.startName} → ${r.endName}` : null,
+                                r.fare != null ? `GH₵ ${r.fare}` : null,
+                                r.distance != null ? `${r.distance}km` : null,
+                              ].filter(Boolean).join(' • ')}
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          className="ios-history-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleSaveRoute(r.id);
+                          }}
+                          disabled={savingRouteId === r.id}
+                          title="Remove from saved routes"
+                        >
+                          <X size={14} color="#8E8E93" />
+                        </button>
+                      </div>
+                      {idx < savedRoutesList.length - 1 && (
+                        <div className="ios-list-divider" style={{ marginLeft: '50px' }}></div>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -8039,6 +8376,60 @@ const GhanaTrotroTransit = () => {
                 onClick={() => setShowStopNotFoundModal(false)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Duplicate Stop Modal (Add / Update Stop) ── */}
+      {duplicateStopDialog && (
+        <div
+          className="modal-overlay non-blocking"
+          onClick={(e) => { if (e.target === e.currentTarget) closeDuplicateStopDialog(); }}
+        >
+          <div className="modal stop-not-found-modal">
+            <div className="modal-header">
+              <button className="close-button" onClick={closeDuplicateStopDialog}>
+                <X size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div className="route-not-found-content">
+              <div className="route-not-found-icon">
+                <MapPin size={32} color="#F59E0B" />
+              </div>
+              <h3 className="route-not-found-title">
+                {duplicateStopDialog.kind === 'exists' ? 'Stop Already Exists' : 'A Stop Is Already Here'}
+              </h3>
+              <p className="route-not-found-msg">
+                {duplicateStopDialog.kind === 'exists'
+                  ? <><strong>&quot;{duplicateStopDialog.name}&quot;</strong> is already on the map, about {duplicateStopDialog.distanceM} m from {duplicateStopDialog.flow === 'add' ? 'this spot' : 'there'}.</>
+                  : <>There&apos;s already a stop called <strong>&quot;{duplicateStopDialog.name}&quot;</strong> about {duplicateStopDialog.distanceM} m from {duplicateStopDialog.flow === 'add' ? 'here' : 'the new location'}.</>}
+              </p>
+              <p className="route-not-found-msg">
+                {duplicateStopDialog.kind === 'exists'
+                  ? (duplicateStopDialog.flow === 'add'
+                      ? "So it wasn't added. If it needs correcting, use Update a Stop instead."
+                      : "So this update wasn't submitted. Try a different name or location.")
+                  : (duplicateStopDialog.flow === 'add'
+                      ? 'Is this a different stop?'
+                      : 'Do you still want to submit this update?')}
+              </p>
+              {duplicateStopDialog.kind === 'nearby' && (
+                <button
+                  className="route-not-found-volunteer-button"
+                  onClick={confirmDuplicateStopDialog}
+                >
+                  <MapPin size={18} color={COLORS.primary} />
+                  <span>{duplicateStopDialog.flow === 'add' ? 'Add Anyway' : 'Submit Anyway'}</span>
+                </button>
+              )}
+              <button
+                className="route-not-found-close-button"
+                onClick={closeDuplicateStopDialog}
+              >
+                {duplicateStopDialog.kind === 'nearby' ? 'Cancel' : 'Close'}
               </button>
             </div>
           </div>
