@@ -108,6 +108,7 @@ const computeSheetSnaps = (viewportW, viewportH, route) => {
 const NOTIFICATIONS_CACHE_TTL_MS = 60 * 1000; // re-open within a minute reuses the fetched list
 const DEST_BAR_SEARCH_CACHE_TTL_MS = 30 * 1000; // repeat/identical "Search" presses reuse the result
 const DEST_BAR_SEARCH_MIN_INTERVAL_MS = 400; // minimum gap between two Search presses, any query
+const BOOKMARK_PROMPT_DISMISSED_KEY = 'gtt_bookmark_prompt_dismissed';
 
 // Standard multi-color Google "G" mark, used on the "Continue with Google" button.
 const GoogleIcon = ({ size = 18 }) => (
@@ -196,6 +197,7 @@ const getCompassLetter = (bearing) => {
 const createBearingStore = () => {
   let value = 0;
   const listeners = new Set();
+  const rotationListeners = new Set();
   return {
     get: () => value,
     set: (next) => {
@@ -206,6 +208,11 @@ const createBearingStore = () => {
     subscribe: (fn) => {
       listeners.add(fn);
       return () => { listeners.delete(fn); };
+    },
+    rotateBy: (delta) => rotationListeners.forEach((fn) => fn(delta)),
+    subscribeRotation: (fn) => {
+      rotationListeners.add(fn);
+      return () => { rotationListeners.delete(fn); };
     },
   };
 };
@@ -234,6 +241,8 @@ const CompassButton = ({ bearingStore, onResetNorth }) => {
   const [isNorth, setIsNorth] = useState(() => isFacingNorth(bearingStore.get()));
   // 'shown' | 'hiding' (fading out) | 'hidden' (unmounted)
   const [phase, setPhase] = useState(() => (isFacingNorth(bearingStore.get()) ? 'hidden' : 'shown'));
+  const pointerDragRef = useRef(null);
+  const suppressClickRef = useRef(false);
 
   // The ring is moved directly on the DOM from a requestAnimationFrame loop,
   // not through React. The map only reports its bearing in bursts, so the
@@ -307,16 +316,56 @@ const CompassButton = ({ bearingStore, onResetNorth }) => {
     return () => clearTimeout(t);
   }, [isNorth]);
 
-  if (phase === 'hidden') return null;
+  const handlePointerDown = (event) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    pointerDragRef.current = {
+      pointerId: event.pointerId,
+      lastAngle: Math.atan2(event.clientY - (bounds.top + bounds.height / 2), event.clientX - (bounds.left + bounds.width / 2)) * (180 / Math.PI),
+      didRotate: false,
+    };
+    suppressClickRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const angle = Math.atan2(event.clientY - (bounds.top + bounds.height / 2), event.clientX - (bounds.left + bounds.width / 2)) * (180 / Math.PI);
+    const delta = ((angle - drag.lastAngle + 540) % 360) - 180;
+    drag.lastAngle = angle;
+    if (Math.abs(delta) < 0.2) return;
+    drag.didRotate = true;
+    bearingStore.rotateBy(delta);
+  };
+
+  const handlePointerUp = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    suppressClickRef.current = drag.didRotate;
+    pointerDragRef.current = null;
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch (_) { /* already released */ }
+  };
 
   return (
     <button
       type="button"
-      className={`sheet-action-button compass-button${phase === 'hiding' ? ' is-hiding' : ''}`}
-      onClick={onResetNorth}
-      aria-label={`Compass, map is facing ${COMPASS_DIRECTION_NAMES[letter]}. Reset north`}
-      title="Reset North"
-      tabIndex={phase === 'hiding' ? -1 : 0}
+      className={`sheet-action-button compass-button${phase !== 'shown' ? ' is-hiding' : ''}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onClick={() => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
+        onResetNorth();
+      }}
+      aria-label={`Map facing ${COMPASS_DIRECTION_NAMES[letter]}. Drag to rotate, tap to reset north`}
+      title="Drag to rotate map; tap to reset north"
+      tabIndex={phase === 'hiding' && window.innerWidth < 1024 ? -1 : 0}
     >
       <svg
         className="compass-ring"
@@ -1276,6 +1325,7 @@ const GhanaTrotroTransit = () => {
   // Session-only - once the user closes the nudge, don't show it again
   // for the rest of this visit.
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
+  const [showBookmarkPrompt, setShowBookmarkPrompt] = useState(false);
   // True once the browser has actually denied the geolocation prompt -
   // after that, calling getCurrentPosition again can never re-show the
   // native prompt, so the banner needs to say so instead of the "Enable"
@@ -1506,6 +1556,37 @@ const GhanaTrotroTransit = () => {
   // geolocation isn't available - encouraging them to turn it on.
   const showLocationPermissionBanner =
     cookiesAccepted && locationPromptEligible && !userLocation && !locationBannerDismissed;
+
+  useEffect(() => {
+    if (!cookiesAccepted) return undefined;
+
+    const userAgent = navigator.userAgent || '';
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(userAgent) ||
+      (navigator.maxTouchPoints > 1 && window.matchMedia('(max-width: 768px)').matches);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (!isMobileDevice || isStandalone) return undefined;
+
+    try {
+      if (localStorage.getItem(BOOKMARK_PROMPT_DISMISSED_KEY) === 'true') return undefined;
+    } catch (error) {
+      // Keep the prompt available for this visit if storage is blocked.
+    }
+
+    const timer = setTimeout(() => setShowBookmarkPrompt(true), 8000);
+    return () => clearTimeout(timer);
+  }, [cookiesAccepted]);
+
+  const dismissBookmarkPrompt = useCallback(() => {
+    setShowBookmarkPrompt(false);
+    try {
+      localStorage.setItem(BOOKMARK_PROMPT_DISMISSED_KEY, 'true');
+    } catch (error) {
+      // Dismiss for this visit even if persistent storage is unavailable.
+    }
+  }, []);
+
+  const isIOSDevice = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   const handleEnableLocation = useCallback(() => {
     requestUserLocation();
@@ -6365,6 +6446,7 @@ const GhanaTrotroTransit = () => {
         resetBearingTrigger={resetBearingTrigger}
         toggleLayerTrigger={toggleLayerTrigger}
         toggle3DTrigger={toggle3DTrigger}
+        bearingStore={mapBearingStore}
         onBearingChange={mapBearingStore.set}
         onPhotoLightboxChange={setIsPhotoLightboxOpen}
         highlightedStop={highlightedStop}
@@ -6388,10 +6470,29 @@ const GhanaTrotroTransit = () => {
         hidden={isPhotoLightboxOpen || showLocationPermissionBanner}
       />
 
+      {showBookmarkPrompt && !isPhotoLightboxOpen && (
+        <aside className="bookmark-prompt" role="status" aria-label="Save this app">
+          <Bookmark size={20} aria-hidden="true" />
+          <p className="bookmark-prompt-text">
+            {isIOSDevice
+              ? 'Save this app: tap Share, then Add to Home Screen.'
+              : 'Save this app: open your browser menu and choose Add to Home screen or Bookmark.'}
+          </p>
+          <button
+            type="button"
+            className="bookmark-prompt-dismiss"
+            onClick={dismissBookmarkPrompt}
+            aria-label="Dismiss bookmark prompt"
+          >
+            <X size={18} />
+          </button>
+        </aside>
+      )}
+
       {/* Location Permission Nudge - shown when the user's location marker
           still isn't on the map (never granted, denied, or unavailable),
           encouraging them to turn it on for a better experience. */}
-      {showLocationPermissionBanner && !isPhotoLightboxOpen && (
+      {showLocationPermissionBanner && !isPhotoLightboxOpen && !showBookmarkPrompt && (
         <div className="location-permission-banner">
           <MapPin size={18} color={COLORS.primary} />
           <p className="location-permission-text">

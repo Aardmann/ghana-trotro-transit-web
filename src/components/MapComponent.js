@@ -28,12 +28,14 @@ const MapComponent = React.memo(({
   resetBearingTrigger = 0,
   toggleLayerTrigger = 0,
   toggle3DTrigger = 0,
+  bearingStore = null,
   onBearingChange,
   onPhotoLightboxChange,
   highlightedStop = null,
 }) => {
   const iframeRef = useRef(null);
   const mapReadyRef = useRef(false);
+  const pendingBearingDeltaRef = useRef(0);
 
   // Tracks whether the map inside the iframe has finished loading,
   // and whether it's taking unusually long (> 3s) so we can reassure the user
@@ -71,6 +73,22 @@ const MapComponent = React.memo(({
       iframeRef.current.contentWindow.postMessage({ type: 'USER_LOCATION_UPDATE', location: location || null }, '*');
     } catch (e) {}
   }, []);
+
+  const rotateMapBy = useCallback((delta) => {
+    if (!iframeRef.current?.contentWindow || !Number.isFinite(delta)) return;
+    if (!mapReadyRef.current) {
+      pendingBearingDeltaRef.current += delta;
+      return;
+    }
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'ROTATE_BEARING_BY', delta }, '*');
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    if (!bearingStore?.subscribeRotation) return undefined;
+    return bearingStore.subscribeRotation(rotateMapBy);
+  }, [bearingStore, rotateMapBy]);
 
   // Sends the map a message to fly/pan to the user-location marker. If this
   // fires before the map has finished loading (e.g. a cached location
@@ -324,6 +342,10 @@ const MapComponent = React.memo(({
       if (e.data?.type === 'MAP_READY') {
         setIsMapReady(true);
         mapReadyRef.current = true;
+        if (pendingBearingDeltaRef.current !== 0) {
+          rotateMapBy(pendingBearingDeltaRef.current);
+          pendingBearingDeltaRef.current = 0;
+        }
         if (!hasSeenMapRef.current) {
           hasSeenMapRef.current = true;
           markMapSeenBefore();
@@ -371,7 +393,7 @@ const MapComponent = React.memo(({
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onLayerChange, onBearingChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange, highlightedStop, flyToStop]);
+  }, [onLayerChange, onBearingChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange, highlightedStop, flyToStop, rotateMapBy]);
 
   // Skip the very first render (trigger starts at 0) — only fire when the
   // parent actually bumps the counter in response to a tap (or the
@@ -1875,6 +1897,9 @@ window.addEventListener('message', function(e) {
   if (!e.data) return;
   if (e.data.type === 'RESET_BEARING') {
     resetBearing();
+  }
+  if (e.data.type === 'ROTATE_BEARING_BY' && Number.isFinite(e.data.delta)) {
+    map.rotateTo(map.getBearing() + e.data.delta, { duration: 0 });
   }
   if (e.data.type === 'TOGGLE_LAYER') {
     toggleLayer();

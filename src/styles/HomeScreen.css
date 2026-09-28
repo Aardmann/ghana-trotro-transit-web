@@ -222,15 +222,16 @@ body {
   width: 44px;
   height: 44px;
   background: rgba(40, 40, 43, 0.62);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   border: 0.5px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  filter: none;
   transition: transform 0.15s ease, background-color 0.15s ease;
   overflow: hidden;
   color: #ffffff;
@@ -260,19 +261,25 @@ body {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border: 1px solid rgba(104, 128, 182, 0.55);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32), inset 0 0 6px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), inset 0 0 3px rgba(0, 0, 0, 0.2);
+  filter: none;
   animation: compass-pop-in 0.22s ease-out;
   transition: transform 0.15s ease, opacity 0.22s ease, background-color 0.15s ease;
+  cursor: grab;
+  touch-action: none;
 }
 
 .compass-button:hover {
   background: radial-gradient(circle at 50% 42%, #343b48 0%, #222833 72%, #1c212a 100%);
 }
 
-.compass-button.is-hiding {
-  opacity: 0;
-  transform: scale(0.7);
-  pointer-events: none;
+@media (max-width: 1023px) {
+  .compass-button.is-hiding {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.7);
+    pointer-events: none;
+  }
 }
 
 .compass-ring {
@@ -359,11 +366,12 @@ body {
   flex-direction: column;
   align-items: stretch;
   background: rgba(40, 40, 43, 0.62);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   border: 0.5px solid rgba(255, 255, 255, 0.18);
   border-radius: 22px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  filter: none;
   overflow: hidden;
 }
 
@@ -592,6 +600,64 @@ body {
 
 .location-permission-dismiss-button:hover {
   color: #6B7280;
+}
+
+.bookmark-prompt {
+  position: fixed;
+  top: 88px;
+  left: 16px;
+  right: 72px;
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+  animation: bookmark-prompt-in 0.22s ease-out;
+}
+
+@keyframes bookmark-prompt-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bookmark-prompt > svg {
+  flex: 0 0 auto;
+}
+
+.bookmark-prompt-text {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bookmark-prompt-dismiss {
+  display: flex;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #4B5563;
+  cursor: pointer;
+}
+
+.bookmark-prompt-dismiss:hover {
+  background: #F3F4F6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bookmark-prompt { animation: none; }
 }
 
 @media (max-width: 640px) {
