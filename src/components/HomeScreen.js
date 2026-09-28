@@ -29,6 +29,8 @@ import {
   setCachedStopSearch,
   getCachedUserSearchHistory,
   setCachedUserSearchHistory,
+  getCachedSavedRoutes,
+  setCachedSavedRoutes,
   getCachedExploreRoutes,
   setCachedExploreRoutes,
   clearCachedExploreRoutes,
@@ -420,9 +422,9 @@ const WeatherPill = ({ lat, lng, hidden = false }) => {
       title={`Tap for ${otherUnitName} (weather by Open-Meteo)`}
     >
       {weather.isDay ? (
-        <Sun size={18} color="#ffd60a" fill="#ffd60a" aria-hidden="true" />
+        <Sun className="weather-icon--day" size={18} color="#ffd60a" fill="#ffd60a" aria-hidden="true" />
       ) : (
-        <Moon size={17} color="#dbe4ff" fill="#dbe4ff" aria-hidden="true" />
+        <Moon className="weather-icon--night" size={17} color="#dbe4ff" fill="#dbe4ff" aria-hidden="true" />
       )}
       <span className="weather-pill-temp">
         {shown}
@@ -1640,7 +1642,10 @@ const GhanaTrotroTransit = () => {
 
   // ── Saved routes (users.saved_routes) + the Search History modal's tabs ──
   const [historyModalTab, setHistoryModalTab] = useState('history'); // 'history' | 'saved'
-  const [savedRoutesData, setSavedRoutesData] = useState([]); // display rows for the Saved tab
+  // Saved route ids + Saved-tab display rows. Hydrated from the device copy
+  // first (see the effects below), then reconciled with users.saved_routes.
+  const [savedRouteIds, setSavedRouteIds] = useState([]);
+  const [savedRoutesData, setSavedRoutesData] = useState([]);
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
   const [savingRouteId, setSavingRouteId] = useState(null); // route id currently being saved/unsaved
 
@@ -2225,28 +2230,46 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Clear all search history for the current user (or guest cookie)
-  const clearSearchHistory = useCallback(async () => {
+  // Clear search history and saved routes for the current user (or guest cookie).
+  const clearAllSearchData = useCallback(async () => {
+    const failures = [];
+
     if (!user) {
       setSearchHistory(clearSearchHistoryCookie());
-      return;
+    } else {
+      try {
+        const { error } = await supabase
+          .from('search_history')
+          .delete()
+          .eq('user_id', user.id);
+        if (error) throw error;
+        setSearchHistory([]);
+        setCachedUserSearchHistory(user.id, []);
+      } catch (error) {
+        console.error('Error clearing search history:', error);
+        failures.push('search history');
+      }
     }
 
-    try {
-      const { error } = await supabase
-        .from('search_history')
-        .delete()
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error clearing search history:', error);
-        return;
+    if (user?.id) {
+      try {
+        const { error } = await supabase
+          .from('users')
+          .update({ saved_routes: [] })
+          .eq('id', user.id);
+        if (error) throw error;
+        setSavedRouteIds([]);
+        setSavedRoutesData([]);
+        setCachedSavedRoutes(user.id, { ids: [], routes: [] });
+        setUserProfile((prev) => (prev ? { ...prev, saved_routes: [] } : prev));
+      } catch (error) {
+        console.error('Error clearing saved routes:', error);
+        failures.push('saved routes');
       }
+    }
 
-      setSearchHistory([]);
-      setCachedUserSearchHistory(user.id, []);
-    } catch (error) {
-      console.error('Error clearing search history:', error);
+    if (failures.length > 0) {
+      alert(`Could not clear ${failures.join(' and ')}. Please try again.`);
     }
   }, [user]);
 
@@ -3161,14 +3184,46 @@ const GhanaTrotroTransit = () => {
   }, [duplicateStopDialog, handleSubmitNewStop, handleSubmitStopUpdate]);
 
   // ── Saved routes ─────────────────────────────────────────────────────
-  const savedRouteIds = useMemo(() => {
-    const list = Array.isArray(userProfile?.saved_routes) ? userProfile.saved_routes : [];
-    return list.map(getSavedRouteId).filter(Boolean);
-  }, [userProfile?.saved_routes]);
+  // Read order: device copy first (instant, works offline), then
+  // users.saved_routes in Supabase, which stays the source of truth. Every
+  // successful save/unsave writes to Supabase and then updates the device copy.
+
+  // 1) As soon as we know who the user is, load their device copy.
+  useEffect(() => {
+    if (!user?.id) {
+      setSavedRouteIds([]);
+      setSavedRoutesData([]);
+      return;
+    }
+    const cached = getCachedSavedRoutes(user.id);
+    if (cached) {
+      setSavedRouteIds(cached.ids);
+      setSavedRoutesData(cached.routes);
+    }
+  }, [user?.id]);
+
+  // 2) When the profile arrives from Supabase, it wins: adopt its ids and
+  // refresh the device copy to match (dropping display rows for routes that
+  // are no longer saved).
+  useEffect(() => {
+    if (!user?.id || userProfile?.id !== user.id || !Array.isArray(userProfile.saved_routes)) return;
+    const ids = userProfile.saved_routes.map(getSavedRouteId).filter(Boolean);
+    setSavedRouteIds((prev) => (
+      prev.length === ids.length && prev.every((v, i) => v === ids[i]) ? prev : ids
+    ));
+    const cached = getCachedSavedRoutes(user.id);
+    setCachedSavedRoutes(user.id, {
+      ids,
+      routes: (cached?.routes || []).filter((r) => ids.includes(r.id)),
+    });
+  }, [user?.id, userProfile?.id, userProfile?.saved_routes]);
 
   // Toggles a route in users.saved_routes. Guests are sent to the sign-in
   // panel instead. The latest saved_routes is re-read right before writing so
   // a save made elsewhere (another tab, the mobile app) isn't overwritten.
+  // Pass a full route object when saving from the route sheet so its display
+  // row can go straight into the device copy (the Saved tab then shows it
+  // instantly), or just an id when removing from the Saved tab.
   const handleToggleSaveRoute = useCallback(async (routeOrId) => {
     const routeId = typeof routeOrId === 'string' ? routeOrId : routeOrId?.id;
     if (!routeId) return;
@@ -3197,6 +3252,26 @@ const GhanaTrotroTransit = () => {
         .eq('id', user.id);
       if (updateError) throw updateError;
 
+      // Mirror onto the device.
+      const nextIds = next.map(getSavedRouteId).filter(Boolean);
+      let rows = (getCachedSavedRoutes(user.id)?.routes || []).filter((r) => nextIds.includes(r.id));
+      if (!alreadySaved && typeof routeOrId === 'object') {
+        const stops = routeOrId.stops || [];
+        rows = [
+          {
+            id: routeId,
+            name: routeOrId.name,
+            fare: routeOrId.total_fare ?? null,
+            distance: routeOrId.total_distance ?? null,
+            startName: stops[0]?.name || null,
+            endName: stops.length > 1 ? stops[stops.length - 1]?.name || null : null,
+          },
+          ...rows.filter((r) => r.id !== routeId),
+        ];
+      }
+      setCachedSavedRoutes(user.id, { ids: nextIds, routes: rows });
+      setSavedRouteIds(nextIds);
+      setSavedRoutesData(rows);
       setUserProfile((prev) => (prev ? { ...prev, saved_routes: next } : prev));
     } catch (error) {
       console.error('Error updating saved routes:', error);
@@ -3206,10 +3281,11 @@ const GhanaTrotroTransit = () => {
     }
   }, [user]);
 
-  // Loads display info for the Saved tab whenever it's showing (or the saved
-  // ids change while it is). Newest save first.
+  // 3) The Saved tab renders from the device copy right away (loaded above),
+  // then quietly refreshes the display rows from Supabase and updates the
+  // device copy. If the refresh fails (e.g. offline) the device rows stay.
   useEffect(() => {
-    if (!showSearchHistoryModal || historyModalTab !== 'saved') return;
+    if (!showSearchHistoryModal || historyModalTab !== 'saved' || !user?.id) return;
     if (savedRouteIds.length === 0) {
       setSavedRoutesData([]);
       return;
@@ -3225,37 +3301,33 @@ const GhanaTrotroTransit = () => {
         if (error) throw error;
         if (cancelled) return;
 
-        const byId = new Map((data || []).map((r) => [r.id, r]));
-        const rows = [...savedRouteIds].reverse()
-          .map((id) => byId.get(id))
-          .filter(Boolean) // routes that have since been deleted just drop out
-          .map((r) => {
-            const ordered = [...(r.route_stops || [])].sort((a, b) => a.stop_order - b.stop_order);
-            return {
-              id: r.id,
-              name: r.name,
-              fare: r.total_fare,
-              distance: r.total_distance,
-              startName: ordered[0]?.stops?.name || null,
-              endName: ordered.length > 1 ? ordered[ordered.length - 1]?.stops?.name || null : null,
-            };
-          });
-        setSavedRoutesData(rows);
+        const rows = (data || []).map((r) => {
+          const ordered = [...(r.route_stops || [])].sort((a, b) => a.stop_order - b.stop_order);
+          return {
+            id: r.id,
+            name: r.name,
+            fare: r.total_fare,
+            distance: r.total_distance,
+            startName: ordered[0]?.stops?.name || null,
+            endName: ordered.length > 1 ? ordered[ordered.length - 1]?.stops?.name || null : null,
+          };
+        });
+        setSavedRoutesData(rows); // routes that have since been deleted just drop out
+        setCachedSavedRoutes(user.id, { ids: savedRouteIds, routes: rows });
       } catch (error) {
-        console.error('Error loading saved routes:', error);
+        console.error('Error refreshing saved routes:', error);
       } finally {
         if (!cancelled) setSavedRoutesLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [showSearchHistoryModal, historyModalTab, savedRouteIds]);
+  }, [showSearchHistoryModal, historyModalTab, savedRouteIds, user?.id]);
 
-  // Unsaving from the Saved tab hides the row immediately, without waiting
-  // for the refetch above.
-  const savedRoutesList = useMemo(
-    () => savedRoutesData.filter((r) => savedRouteIds.includes(r.id)),
-    [savedRoutesData, savedRouteIds]
-  );
+  // Newest save first; only routes that are still saved.
+  const savedRoutesList = useMemo(() => {
+    const byId = new Map(savedRoutesData.map((r) => [r.id, r]));
+    return [...savedRouteIds].reverse().map((id) => byId.get(id)).filter(Boolean);
+  }, [savedRoutesData, savedRouteIds]);
 
   // Always reopen the Search History modal on its History tab.
   useEffect(() => {
@@ -4305,22 +4377,49 @@ const GhanaTrotroTransit = () => {
   // straight to it regardless of what's underneath. The sheet can never be
   // dismissed, so there's no dismiss threshold - a drag just always settles
   // on whichever of the three resting heights it ends closest to.
-  const handleSheetHandlePointerDown = useCallback((e) => {
+  const handleSheetPointerDown = useCallback((e) => {
+    if (e.button !== 0 || e.isPrimary === false) return;
+
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target || target.closest('button, a, input, textarea, select, option, [contenteditable="true"]')) return;
+
+    let ancestor = target;
+    while (ancestor && ancestor !== e.currentTarget) {
+      const { overflowY } = window.getComputedStyle(ancestor);
+      if (/(auto|scroll)/.test(overflowY) && ancestor.scrollHeight > ancestor.clientHeight) return;
+      ancestor = ancestor.parentElement;
+    }
+
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
     sheetDragRef.current = {
       ...sheetDragRef.current,
       active: true,
+      dragging: false,
       startY: e.clientY,
+      startX: e.clientX,
       startH: sheetDragHeight,
       currentH: sheetDragHeight,
     };
-    setSheetIsDragging(true);
   }, [sheetDragHeight]);
 
-  const handleSheetHandlePointerMove = useCallback((e) => {
+  const handleSheetPointerMove = useCallback((e) => {
     const d = sheetDragRef.current;
     if (!d.active) return;
+
+    if (!d.dragging) {
+      const deltaX = e.clientX - d.startX;
+      const deltaY = e.clientY - d.startY;
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 6) return;
+      if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+        d.active = false;
+        return;
+      }
+      d.dragging = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setSheetIsDragging(true);
+    }
+
+    e.preventDefault();
     const snaps = d.snapHeights || SNAP_HEIGHTS;
     const deltaVh = ((d.startY - e.clientY) / window.innerHeight) * 100;
     const newH = Math.min(snaps[snaps.length - 1] + 4, Math.max(snaps[0], d.startH + deltaVh));
@@ -4328,10 +4427,12 @@ const GhanaTrotroTransit = () => {
     setSheetDragHeight(newH);
   }, []);
 
-  const handleSheetHandlePointerUp = useCallback((e) => {
+  const handleSheetPointerUp = useCallback((e) => {
     const d = sheetDragRef.current;
     if (!d.active) return;
     d.active = false;
+    if (!d.dragging) return;
+    d.dragging = false;
     const h = d.currentH;
     const snaps = d.snapHeights || SNAP_HEIGHTS;
     const nearestIdx = snaps.reduce(
@@ -5263,7 +5364,6 @@ const GhanaTrotroTransit = () => {
                   ) : (
                     <>
                       <Share2 size={13} color="#000000" />
-                      <span>Share</span>
                     </>
                   )}
                 </button>
@@ -5278,7 +5378,6 @@ const GhanaTrotroTransit = () => {
                     color="#000000"
                     fill={savedRouteIds.includes(selectedRoute.id) ? '#000000' : 'none'}
                   />
-                  <span>{savedRouteIds.includes(selectedRoute.id) ? 'Saved' : 'Save'}</span>
                 </button>
                 <button
                   className="report-inline-button"
@@ -5286,7 +5385,6 @@ const GhanaTrotroTransit = () => {
                   title="Report an issue"
                 >
                   <Flag size={13} color="#000000" />
-                  <span>Report</span>
                 </button>
               </div>
             </div>
@@ -5851,7 +5949,7 @@ const GhanaTrotroTransit = () => {
             className="destination-bar-action-button"
             onClick={() => { setDonateEmail(user?.email || ''); setShowDonateModal(true); }}
           >
-            <Heart size={15} color={COLORS.primary} />
+            <Heart size={15} color="#ff0000" />
             <span>Buy Me Waakye</span>
           </button>
 
@@ -6394,6 +6492,10 @@ const GhanaTrotroTransit = () => {
       <div
         className={`bottom-sheet${sheetIsDragging ? ' is-dragging' : ''}${!isSheetExpanded ? ' sheet-at-peek' : ''}`}
         ref={bottomSheetRef}
+        onPointerDown={handleSheetPointerDown}
+        onPointerMove={handleSheetPointerMove}
+        onPointerUp={handleSheetPointerUp}
+        onPointerCancel={handleSheetPointerUp}
         style={{
           // px, derived from window.innerHeight (see computeSheetSnaps)
           height: `${Math.round((sheetDragHeight / 100) * viewportSize.h)}px`,
@@ -6408,17 +6510,13 @@ const GhanaTrotroTransit = () => {
       >
         {/* ── Control cluster ──────────────────────────────────────────
             A single right-aligned vertical stack, Apple-Maps-style: dark
-            frosted circular buttons sitting just above the sheet, so they
-            track its top edge as it's dragged. All controls show at peek
-            height; only the 3D pill survives past halfway (there just
-            isn't room for the rest above the sheet at that point); the
-            whole cluster disappears once the sheet is full, same as
-            Apple Maps' own controls do once its sheet covers the screen. */}
-        {!isPhotoLightboxOpen && !isSheetNearFull && (
-          <div className="sheet-top-actions">
-            <div className="sheet-top-actions-group">
-              {!isSheetPastHalfway && (
-                <>
+            frosted circular buttons sitting just above the sheet on mobile,
+            and pinned to the screen corner on desktop. Mobile hides the
+            outer actions at full height and compacts the cluster past halfway. */}
+        {!isPhotoLightboxOpen && (
+          <div className={`sheet-top-actions${isSheetNearFull ? ' sheet-top-actions--hidden-mobile' : ''}`}>
+            <div className={`sheet-top-actions-group${isSheetPastHalfway ? ' is-past-halfway' : ''}`}>
+              <div className="sheet-top-actions-halfway-hidden">
                   {/* Compass - shows which way the top of the map is
                       facing (N / E / S / W) with a ring that rotates to
                       keep the red marker on true north. Hidden while the
@@ -6430,9 +6528,8 @@ const GhanaTrotroTransit = () => {
                     onResetNorth={() => setResetBearingTrigger((t) => t + 1)}
                   />
 
-                  {/* 2D/3D tilt toggle - peek-only now; past halfway the
-                      combined location/route/layer group below takes its
-                      place instead. Label shows the mode tapping it
+                    {/* 2D/3D tilt toggle - hidden past halfway on mobile.
+                      Label shows the mode tapping it
                       switches TO; is3DActive/toggle3DTrigger are
                       forwarded to MapComponent, which eases the map's
                       actual pitch between 0 and 45. */}
@@ -6447,8 +6544,7 @@ const GhanaTrotroTransit = () => {
                   >
                     {is3DActive ? '2D' : '3D'}
                   </button>
-                </>
-              )}
+              </div>
 
               {/* Layer, route, and location live together in one
                   pill-shaped group with a single shared background
@@ -6498,8 +6594,7 @@ const GhanaTrotroTransit = () => {
                 )}
               </div>
 
-              {!isSheetPastHalfway && (
-                <>
+              <div className="sheet-top-actions-halfway-hidden">
                   {/* Info - only shown to guests; a signed-in user has
                       already seen this (and has their profile/settings
                       instead), so there's no need to keep offering it. */}
@@ -6525,8 +6620,7 @@ const GhanaTrotroTransit = () => {
 </svg>
                     </button>
                   )}
-                </>
-              )}
+              </div>
             </div>
           </div>
         )}
@@ -6534,10 +6628,6 @@ const GhanaTrotroTransit = () => {
         {/* ── Drag Handle ── */}
         <div
           className="sheet-drag-handle"
-          onPointerDown={handleSheetHandlePointerDown}
-          onPointerMove={handleSheetHandlePointerMove}
-          onPointerUp={handleSheetHandlePointerUp}
-          onPointerCancel={handleSheetHandlePointerUp}
         >
           <div className="drag-pill" />
         </div>
@@ -6938,8 +7028,8 @@ const GhanaTrotroTransit = () => {
                         className="ios-list-row"
                         onClick={user ? handleOpenAccountView : () => setShowGuestSignIn(true)}
                       >
-                        <span className="ios-row-icon ios-row-icon--purple">
-                          <User size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <User size={20} color={COLORS.primary} />
                         </span>
                         <span className="ios-row-text">Account</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -6958,8 +7048,8 @@ const GhanaTrotroTransit = () => {
                           setShowProfileModal(false);
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--blue">
-                          <History size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <History size={20} color={COLORS.primary} />
                         </span>
                         <span className="ios-row-text">Search History</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -6971,8 +7061,8 @@ const GhanaTrotroTransit = () => {
                         className="ios-list-row"
                         onClick={handleOpenNotifications}
                       >
-                        <span className="ios-row-icon ios-row-icon--orange">
-                          <Bell size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <Bell size={20} color={COLORS.primary}   />
                         </span>
                         <span className="ios-row-text">Notifications</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -6991,8 +7081,8 @@ const GhanaTrotroTransit = () => {
                           setShowProfileModal(false);
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--black">
-                          <MapIcon size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <MapIcon size={20} color={COLORS.primary} />
                         </span>
                         <span className="ios-row-text">Created Routes</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7008,8 +7098,8 @@ const GhanaTrotroTransit = () => {
                           setTimeout(() => setShowReportModal(true), 200);
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--gray">
-                          <Flag size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <Flag size={20} color="#000" />
                         </span>
                         <span className="ios-row-text">Report an Issue</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7023,8 +7113,8 @@ const GhanaTrotroTransit = () => {
                           window.open('https://gtt.nxnx.tech/earn', '_blank', 'noopener,noreferrer');
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--green">
-                          <Coins size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon ">
+                          <Coins size={20} color="#000" />
                         </span>
                         <span className="ios-row-text">Become an Earner</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7036,8 +7126,8 @@ const GhanaTrotroTransit = () => {
                         className="ios-list-row"
                         onClick={handleOpenContributeChoice}
                       >
-                        <span className="ios-row-icon ios-row-icon--teal">
-                          <Plus size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon">
+                          <Plus size={20} color="#000" />
                         </span>
                         <span className="ios-row-text">Contribute</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7053,8 +7143,8 @@ const GhanaTrotroTransit = () => {
                           setShowDonateModal(true);
                         }}
                       >
-                        <span className="ios-row-icon ios-row-icon--red">
-                          <Heart size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon">
+                          <Heart size={20} color="#df1111" />
                         </span>
                         <span className="ios-row-text">Buy Me Waakye</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7112,8 +7202,8 @@ const GhanaTrotroTransit = () => {
                     <p className="ios-section-label">Security</p>
                     <div className="ios-list-group">
                       <button className="ios-list-row" onClick={handlePasswordChange}>
-                        <span className="ios-row-icon ios-row-icon--purple">
-                          <Key size={16} color="#FFFFFF" />
+                        <span className="ios-row-icon">
+                          <Key size={20} color="#000" />
                         </span>
                         <span className="ios-row-text">Change Password</span>
                         <ChevronRight size={18} color="#C7C7CC" className="ios-row-chevron" />
@@ -7194,7 +7284,7 @@ const GhanaTrotroTransit = () => {
       {volunteerMode && !showAddStopModal && (
         <div className="volunteer-mode-banner">
           <div className="volunteer-mode-banner-text">
-            <MapPin size={16} color="#FFFFFF" />
+            <MapPin size={20} color="#fff" />
             <span>Tap anywhere on the map to add a stop</span>
           </div>
           <button className="volunteer-mode-done-button" onClick={handleStopVolunteering}>
@@ -7207,7 +7297,7 @@ const GhanaTrotroTransit = () => {
       {pickingUpdateLocation && (
         <div className="volunteer-mode-banner">
           <div className="volunteer-mode-banner-text">
-            <Edit3 size={16} color="#FFFFFF" />
+            <Edit3 size={16} color="#fff" />
             <span>Tap the map to set this stop&apos;s new location</span>
           </div>
           <button className="volunteer-mode-done-button" onClick={handleCancelPickUpdateLocation}>
@@ -7317,8 +7407,8 @@ const GhanaTrotroTransit = () => {
 
             <div className="modal-content">
               <button className="contribute-choice-option" onClick={handleChooseAddStop}>
-                <span className="ios-row-icon ios-row-icon--teal">
-                  <MapPin size={16} color="#FFFFFF" />
+                <span className="ios-row-icon">
+                  <MapPin size={20} color="#000" />
                 </span>
                 <span className="contribute-choice-text">
                   <span className="contribute-choice-title">Add a Stop</span>
@@ -7330,8 +7420,8 @@ const GhanaTrotroTransit = () => {
               <div className="ios-list-divider"></div>
 
               <button className="contribute-choice-option" onClick={handleChooseUpdateStop}>
-                <span className="ios-row-icon ios-row-icon--blue">
-                  <Edit3 size={16} color="#FFFFFF" />
+                <span className="ios-row-icon">
+                  <Edit3 size={20} color="#000" />
                 </span>
                 <span className="contribute-choice-text">
                   <span className="contribute-choice-title">Update a Stop</span>
@@ -7836,30 +7926,43 @@ const GhanaTrotroTransit = () => {
                 <ChevronLeft size={20} strokeWidth={2.5} />
               </button>
               <h2 className="modal-title">Search History</h2>
-              <button 
-                className="close-button"
-                onClick={() => setShowSearchHistoryModal(false)}
+              <div className="ios-history-header-actions">
+                {(searchHistory.length > 0 || savedRouteIds.length > 0) && (
+                  <button
+                    className="ios-clear-history-button"
+                    onClick={clearAllSearchData}
+                    title="Clear search history and saved routes"
+                  >
+                    <Trash2 size={14} />
+                    Clear All
+                  </button>
+                )}
+                <button
+                  className="close-button"
+                  onClick={() => setShowSearchHistoryModal(false)}
+                  aria-label="Close Search History"
+                >
+                  <X size={18} strokeWidth={2.5} />
+                </button>
+              </div>
+            </div>
+
+            <div className="ios-auth-tabs ios-history-tabs">
+              <button
+                className={`ios-auth-tab ${historyModalTab === 'history' ? 'ios-auth-tab--active' : ''}`}
+                onClick={() => setHistoryModalTab('history')}
               >
-                <X size={18} strokeWidth={2.5} />
+                History
+              </button>
+              <button
+                className={`ios-auth-tab ${historyModalTab === 'saved' ? 'ios-auth-tab--active' : ''}`}
+                onClick={() => setHistoryModalTab('saved')}
+              >
+                Saved{savedRouteIds.length > 0 ? ` (${savedRouteIds.length})` : ''}
               </button>
             </div>
 
             <div className="modal-content ios-history-content">
-              <div className="ios-auth-tabs">
-                <button
-                  className={`ios-auth-tab ${historyModalTab === 'history' ? 'ios-auth-tab--active' : ''}`}
-                  onClick={() => setHistoryModalTab('history')}
-                >
-                  History
-                </button>
-                <button
-                  className={`ios-auth-tab ${historyModalTab === 'saved' ? 'ios-auth-tab--active' : ''}`}
-                  onClick={() => setHistoryModalTab('saved')}
-                >
-                  Saved{savedRouteIds.length > 0 ? ` (${savedRouteIds.length})` : ''}
-                </button>
-              </div>
-
               {historyModalTab === 'history' ? (
               searchHistory.length === 0 ? (
                 <div className="ios-empty-state">
@@ -7873,15 +7976,6 @@ const GhanaTrotroTransit = () => {
                 </div>
               ) : (
                 <>
-                  {searchHistory.length > 0 && (
-                    <button
-                      className="ios-clear-history-button"
-                      onClick={clearSearchHistory}
-                    >
-                      <Trash2 size={14} />
-                      Clear All
-                    </button>
-                  )}
                   <div className="ios-list-group">
                     {searchHistory.map((search, idx) => (
                       <React.Fragment key={search.id}>
@@ -7895,8 +7989,8 @@ const GhanaTrotroTransit = () => {
                               setBottomSheetContent('search');
                             }}
                           >
-                            <span className="ios-row-icon ios-row-icon--blue">
-                              <Navigation size={15} color="#FFFFFF" />
+                            <span className="ios-row-icon">
+                              <Navigation size={20} color="#000" />
                             </span>
                             <span className="ios-history-text">
                               <span className="ios-history-route">
@@ -7959,8 +8053,8 @@ const GhanaTrotroTransit = () => {
                           className="ios-history-row-main"
                           onClick={() => handleOpenSavedRoute(r.id)}
                         >
-                          <span className="ios-row-icon ios-row-icon--blue">
-                            <Bookmark size={15} color="#FFFFFF" />
+                          <span className="ios-row-icon">
+                            <Bookmark size={20} color="#000" fill='#000' />
                           </span>
                           <span className="ios-history-text">
                             <span className="ios-history-route">{r.name}</span>
@@ -8068,8 +8162,8 @@ const GhanaTrotroTransit = () => {
                           className={`ios-notification-row${!n.is_read ? ' ios-notification-row--unread' : ''}`}
                           onClick={() => handleNotificationRowClick(n)}
                         >
-                          <span className="ios-row-icon ios-row-icon--orange">
-                            <Bell size={15} color="#FFFFFF" />
+                          <span className="ios-row-icon">
+                            <Bell size={20} color="#000" />
                           </span>
                           <span className="ios-notification-text">
                             <span className="ios-notification-title-row">
@@ -8144,8 +8238,8 @@ const GhanaTrotroTransit = () => {
                     <React.Fragment key={route.id}>
                       <div className="ios-history-row">
                         <div className="ios-history-row-main">
-                          <span className="ios-row-icon ios-row-icon--black">
-                            <MapIcon size={15} color="#FFFFFF" />
+                          <span className="ios-row-icon">
+                            <MapIcon size={20} color="#000" />
                           </span>
                           <span className="ios-history-text">
                             <span className="ios-history-route">

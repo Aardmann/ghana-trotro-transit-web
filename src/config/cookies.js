@@ -34,6 +34,12 @@ const STOP_SEARCH_CACHE_MAX_ENTRIES = 300;
 const USER_SEARCH_HISTORY_CACHE_PREFIX = 'gtt_user_search_history_';
 const USER_SEARCH_HISTORY_TTL_MS = CACHE_TTL_MS;
 
+// A signed-in user's saved routes (ids + the display info the Saved tab
+// shows), mirrored per user id. Unlike the caches above this has no TTL: it's
+// the user's own list rather than a copy of shared data, and it's reconciled
+// with Supabase (users.saved_routes) whenever the profile loads.
+const USER_SAVED_ROUTES_CACHE_PREFIX = 'gtt_user_saved_routes_';
+
 // ── Stop-photo cache config ──────────────────────────────────────────────
 // Metadata (id/url/approved/mine) for each stop's photos, cached per stop id
 // so reopening the app or panning back over the same stops doesn't re-hit
@@ -357,6 +363,32 @@ export const setCachedUserSearchHistory = (userId, history) => {
   if (!userId) return;
   writeLocalJSON(`${USER_SEARCH_HISTORY_CACHE_PREFIX}${userId}`, {
     history,
+    cachedAt: Date.now(),
+  });
+};
+
+// ── Signed-in user's saved-routes mirror ────────────────────────────────
+// users.saved_routes in Supabase stays the source of truth (it follows the
+// user across devices); this keeps a copy on the device so the Save buttons
+// and the Saved tab can render instantly - and offline - before any DB
+// round-trip. `ids` is the saved route ids (oldest → newest, same order as
+// the DB array); `routes` is display rows for the Saved tab:
+// { id, name, fare, distance, startName, endName }.
+export const getCachedSavedRoutes = (userId) => {
+  if (!userId) return null;
+  const cached = readLocalJSON(`${USER_SAVED_ROUTES_CACHE_PREFIX}${userId}`);
+  if (!cached || !Array.isArray(cached.ids)) return null;
+  return {
+    ids: cached.ids,
+    routes: Array.isArray(cached.routes) ? cached.routes : [],
+  };
+};
+
+export const setCachedSavedRoutes = (userId, { ids, routes }) => {
+  if (!userId || !Array.isArray(ids)) return;
+  writeLocalJSON(`${USER_SAVED_ROUTES_CACHE_PREFIX}${userId}`, {
+    ids,
+    routes: Array.isArray(routes) ? routes : [],
     cachedAt: Date.now(),
   });
 };

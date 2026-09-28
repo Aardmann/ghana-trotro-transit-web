@@ -51,34 +51,34 @@ body {
 .profile-button {
   top: 20px;
   right: 20px;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 /* Hamburger — sits between the profile and plus buttons, opens the
    Explore drawer (Popular Routes / Routes Around You / Locations Nearby). */
 .hamburger-button {
-  top: 80px;
+  top: 72px;
   right: 20px;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 .plus-button {
-  top: 140px;
+  top: 124px;
   right: 20px;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 /* Get the App — same slot pattern as profile/plus, but white so it reads
    as a distinct, lighter action against the solid purple buttons above it. */
 .get-app-button {
   position: absolute;
-  top: 200px;
+  top: 176px;
   right: 20px;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   padding-left: 8px;
   padding-top: 8px;
   background-color: #ffffff;
@@ -136,6 +136,10 @@ body {
   justify-content: flex-end;
   padding: 0 14px 12px;
   pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear;
 }
 
 @media (min-width: 1024px) {
@@ -154,6 +158,62 @@ body {
   align-items: center;
   gap: 12px;
   pointer-events: none;
+}
+
+.sheet-top-actions-halfway-hidden {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-height: 120px;
+  overflow: hidden;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: max-height 180ms ease, opacity 180ms ease, transform 180ms ease, visibility 0s linear;
+}
+
+@media (max-width: 1023px) {
+  .sheet-action-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sheet-top-actions-group,
+  .sheet-top-actions-halfway-hidden {
+    gap: 8px;
+  }
+
+  .sheet-controls-combined {
+    border-radius: 20px;
+  }
+
+  .sheet-top-actions--hidden-mobile {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  .sheet-top-actions-group.is-past-halfway {
+    gap: 0;
+    transition: gap 180ms ease;
+  }
+
+  .sheet-top-actions-group.is-past-halfway .sheet-top-actions-halfway-hidden {
+    max-height: 0;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: max-height 180ms ease, opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  .sheet-top-actions-group.is-past-halfway .sheet-controls-combined {
+    margin-block: 12px;
+    transition: margin 180ms ease;
+  }
 }
 
 .sheet-action-button {
@@ -575,11 +635,18 @@ body {
 }
 
 /* Header styles */
-.search-header, .route-header, .modal-header {
+.search-header, .route-header{
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
 }
 
 .app-title {
@@ -842,6 +909,10 @@ body {
 .swap-button:hover {
   background-color: #E5E7EB;
   transform: rotate(180deg);
+}
+
+.swap-button svg {
+  transform: rotate(90deg);
 }
 
 .search-button {
@@ -1567,30 +1638,56 @@ body {
   max-width: 460px;
   padding: 0 0 24px;
   background: #F2F2F7;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 85vh;
 }
 
 .ios-history-header {
+  position: relative;
   padding: 6px 16px 12px;
   margin-bottom: 0;
   background: #F2F2F7;
 }
 
 .ios-history-header .modal-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 140px);
   font-size: 17px;
   font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+
+.ios-history-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .ios-history-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 50vh;
   padding: 4px 16px 0;
+  overflow-y: auto;
+}
+
+.ios-history-tabs {
+  flex: 0 0 auto;
+  margin: 0 16px 12px;
 }
 
 .ios-clear-history-button {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 14px auto;
-  padding: 7px 14px;
+  margin: 0;
+  padding: 7px 10px;
   border-radius: 999px;
   border: none;
   background: #FEF2F2;
@@ -1824,17 +1921,17 @@ body {
   }
 
   .hamburger-button{
-    top:100px;
+    top:92px;
     z-index: 1;
   }
 
   .plus-button{
-    top:160px;
+    top:144px;
     z-index: 1;
   }
 
   .get-app-button{
-    top:220px;
+    top:196px;
     z-index: 1;
   }
 
@@ -4371,6 +4468,10 @@ body {
        being rotated to look like a left/right swap. */
     transform: none;
   }
+
+  .swap-button svg {
+    transform: none;
+  }
   
   .swap-button:hover {
     transform: rotate(180deg);
@@ -5333,7 +5434,7 @@ body, #root {
   width: 80px;
   height: 80px;
   border-radius: 30px;
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+  background: var(--primary-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6152,7 +6253,7 @@ body, #root {
   font-size: 13px;
   color: #64748B;
   font-weight: 600;
-  padding: 0 16px 4px;
+  padding-bottom: 10px; ;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7879,7 +7980,7 @@ body, #root {
 
 @media (max-width: 768px) {
   .explore-drawer {
-    max-width: 320px;
+    max-width: 360px;
   }
 }
 
