@@ -541,49 +541,75 @@ body {
   .weather-pill { animation: none; }
 }
 
-/* ── Location permission nudge banner ─────────────────────────────────
-   A slim, dismissible bar near the top of the screen encouraging the
-   user to enable location when their marker isn't showing on the map. */
-.location-permission-banner {
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1001;
-  width: calc(100% - 40px);
-  max-width: 480px;
+/* Floating notices share the bookmark prompt's position and surface. */
+.floating-notice-stack {
+  position: fixed;
+  top: 88px;
+  left: 16px;
+  right: 72px;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.floating-notice {
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #ffffff;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 14px;
-  padding: 12px 12px 12px 16px;
-  box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+  animation: bookmark-prompt-in 0.22s ease-out;
+  pointer-events: auto;
 }
 
-.location-permission-text {
+.floating-notice > svg,
+.volunteer-mode-banner-text > svg {
+  flex: 0 0 auto;
+  color: #000;
+}
+
+.location-permission-text,
+.volunteer-mode-banner-text {
   flex: 1;
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
-  color: var(--text-color);
+  color: #111827;
 }
 
-.location-permission-enable-button {
+.volunteer-mode-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.location-permission-enable-button,
+.volunteer-mode-done-button {
   flex-shrink: 0;
   border: none;
-  background: var(--primary-color);
+  background: #000;
   color: #fff;
   font-weight: 600;
-  font-size: 13px;
-  padding: 8px 14px;
-  border-radius: 20px;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 32px;
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
-.location-permission-enable-button:hover {
-  background: #8b5cf6;
+.location-permission-enable-button:hover,
+.volunteer-mode-done-button:hover {
+  filter: brightness(0.92);
 }
 
 .location-permission-dismiss-button {
@@ -603,22 +629,7 @@ body {
 }
 
 .bookmark-prompt {
-  position: fixed;
-  top: 88px;
-  left: 16px;
-  right: 72px;
-  z-index: 1001;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 380px;
-  padding: 10px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 14px;
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
-  animation: bookmark-prompt-in 0.22s ease-out;
+  margin: 0;
 }
 
 @keyframes bookmark-prompt-in {
@@ -657,15 +668,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bookmark-prompt { animation: none; }
+  .floating-notice { animation: none; }
 }
 
 @media (max-width: 640px) {
-  .location-permission-banner {
-    top: 16px;
-    padding: 10px 10px 10px 14px;
-  }
-
   .location-permission-text {
     font-size: 12.5px;
   }
@@ -3478,14 +3484,32 @@ body {
    instances below, which are shown there instead, centered. ── */
 .stop-detail-search-row {
   flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
   padding: 4px 10px 0;
 }
 
 .stop-detail-search-row .input-container {
+  min-width: 0;
+  flex: 1 1 auto;
   /* .quick-search-row's own rule gives this a 15px bottom margin to
      separate it from the scrolling content below; here the summary row
      right underneath supplies that spacing itself. */
   margin-bottom: 0;
+}
+
+@media (max-width: 767px) {
+  .stop-detail-search-row {
+    gap: 6px;
+  }
+
+  .stop-detail-search-row .input-container {
+    padding-inline: 10px;
+  }
+
+  .stop-detail-search-row .input {
+    min-width: 0;
+  }
 }
 
 /* ── Summary row - stop name (+ distance) and Directions; the
@@ -7505,85 +7529,6 @@ body, #root {
   font-weight: 600;
   text-decoration: none;
 }
-/* ══════════════════════════════════════════════════════
-   Volunteer Mode — floating banner
-   ══════════════════════════════════════════════════════ */
-.volunteer-mode-banner {
-  position: fixed;
-  left: 50%;
-  top: 28px;
-  transform: translateX(-50%);
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: #14B8A6;
-  color: #fff;
-  border-radius: 999px;
-  padding: 10px 10px 10px 18px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  max-width: calc(100% - 32px);
-  animation: volunteer-banner-in 0.25s ease-out;
-}
-
-@keyframes volunteer-banner-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-.volunteer-mode-banner-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-.volunteer-mode-banner-text svg {
-  flex-shrink: 0;
-}
-
-.volunteer-mode-done-button {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 18px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s ease;
-}
-
-.volunteer-mode-done-button:hover {
-  background: rgba(255, 255, 255, 0.32);
-}
-
-.volunteer-mode-done-button:active {
-  background: rgba(255, 255, 255, 0.42);
-}
-
-@media (max-width: 480px) {
-  .volunteer-mode-banner {
-    left: 16px;
-    right: 16px;
-    top: 40px;
-    transform: none;
-    max-width: 310px;
-  }
-  .volunteer-mode-banner-text {
-    white-space: normal;
-    font-size: 13px;
-  }
-  @keyframes volunteer-banner-in {
-    from { opacity: 0; transform: translateY(12px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-}
-
 /* ══════════════════════════════════════════════════════
    Add Stop Modal (Volunteer mode)
    ══════════════════════════════════════════════════════ */

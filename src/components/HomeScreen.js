@@ -1895,11 +1895,13 @@ const GhanaTrotroTransit = () => {
   // destination bar used), regardless of which content is currently showing.
   const isSheetExpanded = sheetDragHeight > sheetSnaps[0] + 0.5;
 
-  // True once the sheet has been dragged (or snapped) at or past its half
-  // height - the top-actions row (compass, layer toggle, info, locate,
-  // Google Maps, recenter-route) hides past this point so it doesn't
-  // crowd whichever content the sheet is showing as it grows taller.
-  const isSheetPastHalfway = sheetDragHeight >= sheetSnaps[1];
+  // True once the sheet's top edge has reached the vertical middle of the
+  // SCREEN (not the sheet's own half snap). sheetDragHeight is in vh of
+  // window.innerHeight, so 50 is exactly half the screen. The top-actions row
+  // (compass, layer toggle, info, locate, Google Maps, recenter-route)
+  // compacts past this point so it doesn't crowd the content as the sheet
+  // grows taller.
+  const isSheetPastHalfway = sheetDragHeight >= 50;
 
   // True once the sheet is at (or nearly at) its full snap height - the
   // control cluster (compass, 3D, layer toggle, info, locate, etc.) hides
@@ -1907,6 +1909,40 @@ const GhanaTrotroTransit = () => {
   // for it to sit over, same as Apple Maps' own controls disappearing once
   // its sheet covers almost the whole screen.
   const isSheetNearFull = sheetDragHeight >= sheetSnaps[2] - 2;
+
+  // How far (px, negative = up) the map camera shifts a highlighted stop so
+  // it sits in the visible map area above the sheet. At the half snap (1) the
+  // stop is lifted above the sheet; at peek (0) it stays centred.
+  //
+  // At the full snap (2) the camera is deliberately FROZEN at whatever it was
+  // when the sheet left index 0 or 1 - dragging the sheet up to full must not
+  // move the map, whichever of those two positions it was at. The last
+  // non-full offset is remembered in lastStopCameraOffsetRef.
+  const lastStopCameraOffsetRef = useRef(0);
+  const stopCameraOffsetForSnap = (
+    (bottomSheetContent === 'stop-detail' || bottomSheetContent === 'stop-search-results') &&
+    sheetSnapIndex === 1
+  ) ? -Math.round((sheetSnaps[1] / 100) * viewportSize.h / 2) : 0;
+  const stopCameraOffsetY = sheetSnapIndex === 2
+    ? lastStopCameraOffsetRef.current
+    : stopCameraOffsetForSnap;
+  useLayoutEffect(() => {
+    if (sheetSnapIndex !== 2) lastStopCameraOffsetRef.current = stopCameraOffsetForSnap;
+  }, [sheetSnapIndex, stopCameraOffsetForSnap]);
+
+  // Bottom padding (px) the map uses when it fits a found route, so the whole
+  // route sits in the map area ABOVE the sheet - the route equivalent of
+  // stopCameraOffsetY. It is the height of the sheet at its current resting
+  // snap (peek or half). At the full snap (2) it is frozen at the last peek/
+  // half value, so dragging the sheet to full never moves the map.
+  const lastRouteBottomPadRef = useRef(0);
+  const routeBottomPaddingForSnap = Math.round((sheetSnaps[Math.min(sheetSnapIndex, 1)] / 100) * viewportSize.h);
+  const routeBottomPadding = sheetSnapIndex === 2
+    ? lastRouteBottomPadRef.current
+    : routeBottomPaddingForSnap;
+  useLayoutEffect(() => {
+    if (sheetSnapIndex !== 2) lastRouteBottomPadRef.current = routeBottomPaddingForSnap;
+  }, [sheetSnapIndex, routeBottomPaddingForSnap]);
 
   // Stop detail - shown after picking a stop via the destination content (search,
   // a suggestion, or a Stops Near You card). Images are fetched per-stop.
@@ -4548,6 +4584,19 @@ const GhanaTrotroTransit = () => {
     setSheetDragHeight(snaps[1]);
   }, []);
 
+  // Used by the search inputs' onFocus. Tapping a field only lifts the sheet
+  // when it is down at peek (index 0). If it is already at half or full we
+  // leave it alone - in particular a full (index 2) sheet stays full while the
+  // user types, and only comes down to half once a search actually runs and
+  // the map starts flying to the stop (see openStopSearchResults /
+  // openStopDetail -> expandSheetFromPeek).
+  const raiseSheetToHalfOnFocus = useCallback(() => {
+    if (sheetSnapIndexRef.current !== 0) return;
+    const snaps = sheetDragRef.current.snapHeights || SNAP_HEIGHTS;
+    setSheetSnapIndex(1);
+    setSheetDragHeight(snaps[1]);
+  }, []);
+
   // Lazily loads Popular Routes / Stops Near You data (same source as the
   // Explore drawer) the first time the sheet is dragged open past its peek
   // height, regardless of which content is showing.
@@ -4570,6 +4619,8 @@ const GhanaTrotroTransit = () => {
     const lat = typeof rawStop.lat === 'number' ? rawStop.lat : parseFloat(rawStop.latitude);
     const lng = typeof rawStop.lng === 'number' ? rawStop.lng : parseFloat(rawStop.longitude);
     const stop = { ...rawStop, lat, lng };
+
+    expandSheetFromPeek();
 
     // Move the map to this stop and drop a highlight pin on it - covers all
     // the ways a stop gets opened from the destination bar (typed search,
@@ -4606,7 +4657,7 @@ const GhanaTrotroTransit = () => {
     } finally {
       setStopDetailImagesLoading(false);
     }
-  }, [fetchNearbyStops]);
+  }, [expandSheetFromPeek, fetchNearbyStops]);
 
   const closeStopDetail = useCallback(() => {
     setSelectedStopDetail(null);
@@ -4631,6 +4682,7 @@ const GhanaTrotroTransit = () => {
       return { ...rawStop, lat, lng };
     });
 
+    expandSheetFromPeek();
     setSelectedStopDetail(null);
     setStopDetailImages([]);
     setStopImageLightboxIndex(null);
@@ -4651,7 +4703,7 @@ const GhanaTrotroTransit = () => {
     if (best && !Number.isNaN(best.lat) && !Number.isNaN(best.lng)) {
       setHighlightedStop({ id: best.id ?? null, lat: best.lat, lng: best.lng, name: best.name });
     }
-  }, [fetchNearbyStops]);
+  }, [expandSheetFromPeek, fetchNearbyStops]);
 
   const closeStopSearchResults = useCallback(() => {
     setStopSearchResults([]);
@@ -5853,11 +5905,10 @@ const GhanaTrotroTransit = () => {
             onFocus={() => {
               setActiveInput('destination');
               ensureConnected();
-              // Tapping into the field pulls the sheet to its half snap -
-              // enough room for suggestions/browse content beneath the
-              // keyboard without taking over the whole screen.
-              setSheetSnapIndex(1);
-              setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
+              // Tapping into the field lifts a peeked sheet to its half snap
+              // (enough room for suggestions/browse content beneath the
+              // keyboard). A half or full sheet is left where it is.
+              raiseSheetToHalfOnFocus();
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleDestBarSearch();
@@ -6044,7 +6095,7 @@ const GhanaTrotroTransit = () => {
         </div>
       </div>
     </div>
-  ), [destination, suggestions, searchHistory, popularRoutes, locationsNearby, exploreLoading, userLocation, user, ensureConnected, fetchSuggestions, handleDestBarSearch, findRoutes, openStopDetail, handleExploreRouteSelect]);
+  ), [destination, suggestions, searchHistory, popularRoutes, locationsNearby, exploreLoading, userLocation, user, ensureConnected, fetchSuggestions, handleDestBarSearch, findRoutes, openStopDetail, handleExploreRouteSelect, raiseSheetToHalfOnFocus]);
 
   // ── Stop detail content ────────────────────────────────────────────────
   // Shown after picking a stop from the destination content (search
@@ -6087,8 +6138,7 @@ const GhanaTrotroTransit = () => {
                 // Same as in the destination content: tapping the field
                 // pulls the sheet to its half snap so suggestions have room
                 // above the keyboard without taking over the screen.
-                setSheetSnapIndex(1);
-                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
+                raiseSheetToHalfOnFocus();
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleDestBarSearch();
@@ -6227,7 +6277,7 @@ const GhanaTrotroTransit = () => {
         </div>
       </>
     );
-  }, [selectedStopDetail, stopDetailDistance, stopDetailImagesLoading, stopDetailImages, stopDetailNearby, closeStopDetail, handleStopDetailDirections, openStopImageLightbox, openStopDetail, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek]);
+  }, [selectedStopDetail, stopDetailDistance, stopDetailImagesLoading, stopDetailImages, stopDetailNearby, closeStopDetail, handleStopDetailDirections, openStopImageLightbox, openStopDetail, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek, raiseSheetToHalfOnFocus]);
 
   // ── Stop search-results content ────────────────────────────────────────
   // Shown after running a destination-bar search that turns up more than
@@ -6269,8 +6319,7 @@ const GhanaTrotroTransit = () => {
                 // Tapping the field pulls the sheet to its half snap so
                 // suggestions have room above the keyboard without taking
                 // over the screen.
-                setSheetSnapIndex(1);
-                setSheetDragHeight((sheetDragRef.current.snapHeights || SNAP_HEIGHTS)[1]);
+                raiseSheetToHalfOnFocus();
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleDestBarSearch();
@@ -6352,7 +6401,7 @@ const GhanaTrotroTransit = () => {
         </div>
       </>
     );
-  }, [stopSearchResults, closeStopSearchResults, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek, userLocation, nearbyStops, handleStopDetailDirectionsFor, openStopDetail, openResultLightbox]);
+  }, [stopSearchResults, closeStopSearchResults, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek, raiseSheetToHalfOnFocus, userLocation, nearbyStops, handleStopDetailDirectionsFor, openStopDetail, openResultLightbox]);
 
   const renderBottomSheetContent = useCallback(() => {
     if (bottomSheetContent === 'destination') {
@@ -6450,6 +6499,8 @@ const GhanaTrotroTransit = () => {
         onBearingChange={mapBearingStore.set}
         onPhotoLightboxChange={setIsPhotoLightboxOpen}
         highlightedStop={highlightedStop}
+        highlightedStopOffsetY={stopCameraOffsetY}
+        routeBottomPadding={routeBottomPadding}
       />
 
       <SeoContent />
@@ -6470,50 +6521,75 @@ const GhanaTrotroTransit = () => {
         hidden={isPhotoLightboxOpen || showLocationPermissionBanner}
       />
 
-      {showBookmarkPrompt && !isPhotoLightboxOpen && (
-        <aside className="bookmark-prompt" role="status" aria-label="Save this app">
-          <Bookmark size={20} aria-hidden="true" />
-          <p className="bookmark-prompt-text">
-            {isIOSDevice
-              ? 'Save this app: tap Share, then Add to Home Screen.'
-              : 'Save this app: open your browser menu and choose Add to Home screen or Bookmark.'}
-          </p>
-          <button
-            type="button"
-            className="bookmark-prompt-dismiss"
-            onClick={dismissBookmarkPrompt}
-            aria-label="Dismiss bookmark prompt"
-          >
-            <X size={18} />
-          </button>
-        </aside>
-      )}
+      {!isPhotoLightboxOpen && (showBookmarkPrompt || showLocationPermissionBanner || (volunteerMode && !showAddStopModal) || pickingUpdateLocation) && (
+        <div className="floating-notice-stack">
+          {showBookmarkPrompt && (
+            <aside className="floating-notice bookmark-prompt" role="status" aria-label="Save this app">
+              <Bookmark size={20} aria-hidden="true" />
+              <p className="bookmark-prompt-text">
+                {isIOSDevice
+                  ? 'Save this app: tap Share, then Add to Home Screen.'
+                  : 'Save this app: open your browser menu and choose Add to Home screen or Bookmark.'}
+              </p>
+              <button
+                type="button"
+                className="bookmark-prompt-dismiss"
+                onClick={dismissBookmarkPrompt}
+                aria-label="Dismiss bookmark prompt"
+              >
+                <X size={18} />
+              </button>
+            </aside>
+          )}
 
-      {/* Location Permission Nudge - shown when the user's location marker
-          still isn't on the map (never granted, denied, or unavailable),
-          encouraging them to turn it on for a better experience. */}
-      {showLocationPermissionBanner && !isPhotoLightboxOpen && !showBookmarkPrompt && (
-        <div className="location-permission-banner">
-          <MapPin size={18} color={COLORS.primary} />
-          <p className="location-permission-text">
-            {locationPermissionDenied
-              ? 'Location is blocked for this app. Enable it in your browser or device settings, then tap Enable again.'
-              : 'Turn on location for a better experience, see your position and nearby stops on the map.'}
-          </p>
-          <button
-            className="location-permission-enable-button"
-            onClick={handleEnableLocation}
-            disabled={isRequestingLocation}
-          >
-            {isRequestingLocation ? 'Enabling…' : 'Enable'}
-          </button>
-          <button
-            className="location-permission-dismiss-button"
-            onClick={() => setLocationBannerDismissed(true)}
-            aria-label="Dismiss"
-          >
-            <X size={16} strokeWidth={2.5} />
-          </button>
+          {showLocationPermissionBanner && !showBookmarkPrompt && (
+            <div className="floating-notice location-permission-banner" role="status">
+              <MapPin size={18} aria-hidden="true" />
+              <p className="location-permission-text">
+                {locationPermissionDenied
+                  ? 'Location is blocked for this app. Enable it in your browser or device settings, then tap Enable again.'
+                  : 'Turn on location for a better experience, see your position and nearby stops on the map.'}
+              </p>
+              <button
+                className="location-permission-enable-button"
+                onClick={handleEnableLocation}
+                disabled={isRequestingLocation}
+              >
+                {isRequestingLocation ? 'Enabling…' : 'Enable'}
+              </button>
+              <button
+                className="location-permission-dismiss-button"
+                onClick={() => setLocationBannerDismissed(true)}
+                aria-label="Dismiss"
+              >
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
+
+          {volunteerMode && !showAddStopModal && (
+            <div className="floating-notice volunteer-mode-banner" role="status">
+              <div className="volunteer-mode-banner-text">
+                <MapPin size={20} aria-hidden="true" />
+                <span>Tap anywhere on the map to add a stop</span>
+              </div>
+              <button className="volunteer-mode-done-button" onClick={handleStopVolunteering}>
+                Done
+              </button>
+            </div>
+          )}
+
+          {pickingUpdateLocation && (
+            <div className="floating-notice volunteer-mode-banner" role="status">
+              <div className="volunteer-mode-banner-text">
+                <Edit3 size={18} aria-hidden="true" />
+                <span>Tap the map to set this stop&apos;s new location</span>
+              </div>
+              <button className="volunteer-mode-done-button" onClick={handleCancelPickUpdateLocation}>
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -7378,32 +7454,6 @@ const GhanaTrotroTransit = () => {
             <div className="loading-spinner"></div>
             <p className="sign-out-loading-text">Deleting account...</p>
           </div>
-        </div>
-      )}
-
-      {/* ── Volunteer mode banner (add a stop) ── */}
-      {volunteerMode && !showAddStopModal && (
-        <div className="volunteer-mode-banner">
-          <div className="volunteer-mode-banner-text">
-            <MapPin size={20} color="#fff" />
-            <span>Tap anywhere on the map to add a stop</span>
-          </div>
-          <button className="volunteer-mode-done-button" onClick={handleStopVolunteering}>
-            Done
-          </button>
-        </div>
-      )}
-
-      {/* ── Pick new location banner (Update Stop → Change Location) ── */}
-      {pickingUpdateLocation && (
-        <div className="volunteer-mode-banner">
-          <div className="volunteer-mode-banner-text">
-            <Edit3 size={16} color="#fff" />
-            <span>Tap the map to set this stop&apos;s new location</span>
-          </div>
-          <button className="volunteer-mode-done-button" onClick={handleCancelPickUpdateLocation}>
-            Cancel
-          </button>
         </div>
       )}
 

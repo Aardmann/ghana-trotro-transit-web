@@ -32,9 +32,17 @@ const MapComponent = React.memo(({
   onBearingChange,
   onPhotoLightboxChange,
   highlightedStop = null,
+  highlightedStopOffsetY = 0,
+  routeBottomPadding = 0,
 }) => {
   const iframeRef = useRef(null);
   const mapReadyRef = useRef(false);
+  // Latest px of sheet covering the bottom of the map. A ref (not a
+  // dependency of generateHTML) so a sheet snap change never rebuilds the
+  // iframe - it is baked into a freshly built iframe and otherwise pushed
+  // live with SET_ROUTE_PADDING.
+  const routeBottomPaddingRef = useRef(routeBottomPadding);
+  routeBottomPaddingRef.current = routeBottomPadding;
   const pendingBearingDeltaRef = useRef(0);
 
   // Tracks whether the map inside the iframe has finished loading,
@@ -121,10 +129,10 @@ const MapComponent = React.memo(({
   // below (same as syncUserLocation) rather than a one-shot pending flag,
   // since highlightedStop is persistent state ("what's currently
   // highlighted"), not a one-off tap trigger.
-  const flyToStop = useCallback((stop) => {
+  const flyToStop = useCallback((stop, offsetY = 0) => {
     if (!iframeRef.current?.contentWindow || !stop) return;
     try {
-      iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_STOP', stop }, '*');
+      iframeRef.current.contentWindow.postMessage({ type: 'FLY_TO_STOP', stop, offsetY }, '*');
     } catch (e) {}
   }, []);
 
@@ -220,6 +228,24 @@ const MapComponent = React.memo(({
     return () => { cancelled = true; clearTimeout(debounceTimer); };
   }, [stops, nearbyStops, currentUserId, syncStopImages]);
 
+
+  // Volunteer mode (tap-the-map-to-add-a-stop) hides the route line, its
+  // stop markers/photo badges and the walk arcs so the map is clear for
+  // placing a stop; tapping Done restores them. This is pushed live into the
+  // running iframe, so entering/leaving volunteer mode never reloads the map
+  // or resets the camera. A ref is used so MAP_READY can send the latest value.
+  const volunteerModeRef = useRef(volunteerMode);
+  volunteerModeRef.current = volunteerMode;
+  const syncVolunteerMode = useCallback((value) => {
+    if (!mapReadyRef.current || !iframeRef.current?.contentWindow) return;
+    try {
+      iframeRef.current.contentWindow.postMessage({ type: 'SET_VOLUNTEER_MODE', value: !!value }, '*');
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    syncVolunteerMode(volunteerMode);
+  }, [volunteerMode, syncVolunteerMode]);
 
   // Whenever React's userLocation changes (a fresh GPS fix, permission
   // newly granted, etc.), push it into the already-running map instead of
@@ -328,7 +354,7 @@ const MapComponent = React.memo(({
   // syncUserLocation below) rather than triggering a full iframe rebuild.
   useEffect(() => {
     knownNearbyKeysRef.current = new Set();
-  }, [center, routeCoordinates, stops, primaryColor, volunteerMode]);
+  }, [center, routeCoordinates, stops, primaryColor]);
 
   // Listen for layer-change / map-ready / stop-photo messages from the iframe
   useEffect(() => {
@@ -352,8 +378,13 @@ const MapComponent = React.memo(({
         }
         syncStopImages(stopImagesByStop);
         syncUserLocation(userLocation);
+        syncVolunteerMode(volunteerModeRef.current);
+        try {
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: 'SET_ROUTE_PADDING', bottom: routeBottomPaddingRef.current, refit: true }, '*');
+        } catch (err) {}
         if (highlightedStop) {
-          flyToStop(highlightedStop);
+          flyToStop(highlightedStop, highlightedStopOffsetY);
         }
         if (pendingRecenterRef.current) {
           pendingRecenterRef.current = false;
@@ -393,7 +424,7 @@ const MapComponent = React.memo(({
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onLayerChange, onBearingChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange, highlightedStop, flyToStop, rotateMapBy]);
+  }, [onLayerChange, onBearingChange, stopImagesByStop, syncStopImages, userLocation, syncUserLocation, syncVolunteerMode, flyToUser, flyToRoute, handleStopImageUpload, onMapTap, onNearbyStopSelect, onMapMoved, sendNearbyStops, onPhotoLightboxChange, highlightedStop, highlightedStopOffsetY, flyToStop, rotateMapBy]);
 
   // Skip the very first render (trigger starts at 0) — only fire when the
   // parent actually bumps the counter in response to a tap (or the
@@ -435,11 +466,22 @@ const MapComponent = React.memo(({
   useEffect(() => {
     if (!mapReadyRef.current) return;
     if (highlightedStop) {
-      flyToStop(highlightedStop);
+      flyToStop(highlightedStop, highlightedStopOffsetY);
     } else {
       clearHighlightedStop();
     }
-  }, [highlightedStop, flyToStop, clearHighlightedStop]);
+  }, [highlightedStop, highlightedStopOffsetY, flyToStop, clearHighlightedStop]);
+
+  // The sheet moved between peek and half: refit the found route into the
+  // map area above it. HomeScreen holds this value steady while the sheet is
+  // at its full snap, so nothing fires (and the map stays put) there.
+  useEffect(() => {
+    if (!mapReadyRef.current) return;
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'SET_ROUTE_PADDING', bottom: routeBottomPadding, refit: true }, '*');
+    } catch (err) {}
+  }, [routeBottomPadding]);
 
   // Compass and layer-toggle buttons are rendered by HomeScreen (so they can
   // live in the unified bottom sheet's top-actions row and drag with it)
@@ -750,6 +792,10 @@ var SAT_THUMB = '${SAT_THUMB}';
 var OSM_THUMB = '${OSM_THUMB}';
 var PRIMARY_COLOR = '${primaryColor}';
 var VOLUNTEER_MODE = ${volunteerModeFlag};
+// While true the route line, route stop markers, photo badges and walk arcs
+// are not drawn (volunteer mode). The route data is still fetched/cached so
+// it can be restored instantly when volunteer mode ends.
+var routeHidden = VOLUNTEER_MODE;
 
 // ── State ────────────────────────────────────────────────────────────────────
 var currentLayer    = '${initialLayer}';
@@ -760,6 +806,16 @@ var mapReady        = false;
 // 2D/3D mode is currently active instead of forcing pitch back to 45.
 var is3D             = true;
 var routeBounds     = null;
+var routeBottomPad  = ${Math.max(0, Math.round(routeBottomPaddingRef.current || 0))};  // px of sheet over the bottom of the map
+
+// Padding for fitting the route: 60px around, plus the sheet on the bottom,
+// clamped so a tall sheet on a short map can never make the fit impossible.
+function routeFitPadding() {
+  var base = 60;
+  var h = map.getContainer().clientHeight || 600;
+  var bottom = Math.min(base + routeBottomPad, Math.max(base, h - base - 100));
+  return { top: base, left: base, right: base, bottom: bottom };
+}
 var stopMarkers     = [];
 var nearbyMarkers   = [];
 var highlightedStopData = null;  // the {lat,lng,id,...} currently highlighted, or null
@@ -768,7 +824,13 @@ var photoMarkers    = [];
 var photoBadgeEls   = {};
 var stopsById       = {};
 var lastRoadGeoJSON = null;
-var lastWalkArcGeoJSON = null;
+var lastWalkArcBalls = null;
+// Walk arc from the user-location marker to the route's start stop. Lives in
+// its own source/layer so GPS updates can refresh it without touching the
+// route's own walk-arc layer.
+var USER_WALK_ARC_MAX_M = 2000;  // only show the arc when the user is within 2 km of the start
+var USER_WALK_ARC_MIN_M = 15;    // closer than this you're basically at the start - no arc
+var lastUserArcFrom = null;      // {lat,lng} the arc was last built from
 
 // ── Data from React ──────────────────────────────────────────────────────────
 var allStops    = ${stopsJSON};
@@ -944,11 +1006,40 @@ function toggleLayer() {
 // Re-add route lines and stop markers after a style change
 // (sources/layers are lost when the style is swapped)
 function redrawAfterStyleChange() {
-  if (lastRoadGeoJSON) addRouteLayer(lastRoadGeoJSON, lastWalkArcGeoJSON);
+  if (!routeHidden && lastRoadGeoJSON) addRouteLayer(lastRoadGeoJSON, lastWalkArcBalls);
+  lastUserArcFrom = null; // the style swap wiped the source; force a rebuild
+  refreshUserWalkArc();
   drawStops();
   redrawAllNearbyMarkers();
   drawStopPhotoBadges();
   drawUserLocation();
+}
+
+// ── Volunteer mode: hide / restore the route ─────────────────────────────────
+function hideRoute() {
+  routeHidden = true;
+  if (!mapReady) return;
+  try {
+    if (map.getLayer('route-line')) map.removeLayer('route-line');
+    if (map.getSource('route-src')) map.removeSource('route-src');
+  } catch (err) {}
+  setBallLayer('walk-arc-balls', null);   // walk arcs between route stops
+  clearUserWalkArc();                     // you -> start walk arc
+  drawStops();                            // no-ops (clears) while routeHidden
+  drawStopPhotoBadges();
+}
+
+function showRoute() {
+  routeHidden = false;
+  if (!mapReady) return;
+  // If OSRM is still loading, the route is drawn (and fitted) when it lands.
+  addRouteLayer(lastRoadGeoJSON, lastWalkArcBalls);
+  refreshUserWalkArc();
+  drawStops();
+  drawStopPhotoBadges();
+  if (routeBounds) {
+    map.fitBounds(routeBounds, { padding: routeFitPadding(), animate: true, duration: 800 });
+  }
 }
 
 // ── Road routing via OSRM ─────────────────────────────────────────────────────
@@ -992,29 +1083,30 @@ function drawRouteWithRoads() {
       if (r.group.type === 'road' && r.coords.length > 0) roadLines.push(r.coords);
     });
 
-    var walkArcFeatures = [];
+    var walkBalls = [];
     groups.forEach(function(g) {
       if (g.type !== 'walk') return;
       var from = allStops[g.indices[0]];
       var to   = allStops[g.indices[1]];
       if (from.fare_to_next !== 0) return;
-      // The walk arc is a real 3-D extruded dash trail with true elevation,
-      // so it reads as going over-and-above from every bearing/pitch angle
-      walkArcFeatures = walkArcFeatures.concat(
-        buildWalkArcPolygons([from.lat, from.lng], [to.lat, to.lng], 40)
+      // Walks between stops use the exact same round-ball arc as the
+      // user -> start walk (same builder, same dot spacing).
+      walkBalls = walkBalls.concat(
+        buildWalkArcBalls(
+          [from.lat, from.lng], [to.lat, to.lng],
+          walkArcDotCount(haversineMeters([from.lat, from.lng], [to.lat, to.lng]))
+        )
       );
     });
 
     var roadGeoJSON = roadLines.length > 0
       ? { type:'Feature', geometry:{ type:'MultiLineString', coordinates:roadLines } }
       : null;
-    var walkArcGeoJSON = walkArcFeatures.length > 0
-      ? { type:'FeatureCollection', features:walkArcFeatures }
-      : null;
 
     lastRoadGeoJSON = roadGeoJSON;
-    lastWalkArcGeoJSON = walkArcGeoJSON;
-    addRouteLayer(roadGeoJSON, walkArcGeoJSON);
+    lastWalkArcBalls = walkBalls;
+    if (!routeHidden) addRouteLayer(roadGeoJSON, walkBalls);
+    refreshUserWalkArc();
 
     var allCoords = allStops.map(function(s) { return [s.lng, s.lat]; });
     roadLines.forEach(function(line) { line.forEach(function(c) { allCoords.push(c); }); });
@@ -1024,14 +1116,14 @@ function drawRouteWithRoads() {
         new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
       );
       routeBounds = bounds;
-      map.fitBounds(bounds, { padding:60, animate:true, duration:800 });
+      if (!routeHidden) map.fitBounds(bounds, { padding:routeFitPadding(), animate:true, duration:800 });
     }
   });
 }
 
-function addRouteLayer(roadGeoJSON, walkArcGeoJSON) {
-  ['route-line', 'walk-arc-layer'].forEach(function(id) { if (map.getLayer(id))  map.removeLayer(id); });
-  ['route-src',  'walk-arc-src' ].forEach(function(id) { if (map.getSource(id)) map.removeSource(id); });
+function addRouteLayer(roadGeoJSON, walkBalls) {
+  if (map.getLayer('route-line')) map.removeLayer('route-line');
+  if (map.getSource('route-src')) map.removeSource('route-src');
 
   if (roadGeoJSON) {
     map.addSource('route-src', { type:'geojson', data:roadGeoJSON });
@@ -1042,22 +1134,46 @@ function addRouteLayer(roadGeoJSON, walkArcGeoJSON) {
     });
   }
 
-  // The real 3-D arc: a trail of small extruded dashes with true elevation
-  // (base/height in metres), so its "over-and-above" shape is a genuine 3-D
-  // object rather than a lat/lng offset — it reads correctly from any
-  // bearing or pitch, with no flat line underneath it.
-  if (walkArcGeoJSON) {
-    map.addSource('walk-arc-src', { type:'geojson', data:walkArcGeoJSON });
-    map.addLayer({
-      id:'walk-arc-layer', type:'fill-extrusion', source:'walk-arc-src',
-      paint:{
-        'fill-extrusion-color':'#10B981',
-        'fill-extrusion-base':['get', 'base'],
-        'fill-extrusion-height':['get', 'height'],
-        'fill-extrusion-opacity':0.9
-      }
-    });
+  // Walk arcs between stops: a trail of real 3-D round balls (custom WebGL
+  // layer - see createBallLayerImpl). Passing nothing removes the layer.
+  setBallLayer('walk-arc-balls', walkBalls);
+}
+
+// ── Walk arc: user-location marker → route start ───────────────────────────
+function clearUserWalkArc() {
+  setBallLayer('user-walk-arc-balls', null);
+  lastUserArcFrom = null;
+}
+
+// Draws (or updates / removes) the arc. Safe to call any time: after the route
+// is drawn, after a style swap, and on every location update.
+function refreshUserWalkArc() {
+  if (!mapReady) return;
+
+  // Needs an active route AND the user-location marker to be on
+  if (allStops.length < 2 || !userLoc || routeHidden) { clearUserWalkArc(); return; }
+
+  var start = allStops[0];
+  var distM = haversineMeters([userLoc.lat, userLoc.lng], [start.lat, start.lng]);
+  if (distM > USER_WALK_ARC_MAX_M || distM < USER_WALK_ARC_MIN_M) { clearUserWalkArc(); return; }
+
+  // Skip rebuilding for GPS jitter (<5 m) when the arc is already on screen
+  if (map.getLayer('user-walk-arc-balls') && lastUserArcFrom &&
+      haversineMeters([lastUserArcFrom.lat, lastUserArcFrom.lng], [userLoc.lat, userLoc.lng]) < 5) {
+    return;
   }
+
+  lastUserArcFrom = { lat: userLoc.lat, lng: userLoc.lng };
+  setBallLayer(
+    'user-walk-arc-balls',
+    buildWalkArcBalls([userLoc.lat, userLoc.lng], [start.lat, start.lng], walkArcDotCount(distM))
+  );
+}
+
+// One ball per ~9 m (clamped) so every walk arc - user -> start, and walks
+// between stops - gets the same ball spacing regardless of its length.
+function walkArcDotCount(distM) {
+  return Math.max(8, Math.min(200, Math.round(distM / 8)));
 }
 
 // Great-circle-ish straight-line distance in metres between two lat/lng points
@@ -1071,84 +1187,204 @@ function haversineMeters(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Builds a trail of small, separated extruded dash-blocks that step up and
-// back down between "from" and "to", tracing a parabolic height profile.
-// Because each dash's elevation is real 3-D (fill-extrusion-base/height in
-// metres) rather than a horizontal lat/lng offset, the dashed arc keeps its
-// "over-and-above" silhouette no matter how the map is rotated or pitched.
-function buildWalkArcPolygons(from, to, n) {
-  var distM   = haversineMeters(from, to);
-  var maxH    = Math.min(Math.max(distM * 0.25, 12), 60); // clamp: 12–60 m peak
-  var widthM  = 4.5;    // dash width, metres (a little bigger than before)
-  var dashFrac = 0.45;  // fraction of each step that is solid dash (rest is gap)
-  var latM    = 111320;
-  var lngM    = 111320 * Math.cos(((from[0] + to[0]) / 2) * Math.PI / 180);
-
-  function pointAt(t) {
-    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
-  }
-  function heightAt(t) {
-    return maxH * Math.sin(Math.PI * t);
-  }
-
-  // Builds a rounded "capsule" (stadium-shaped) footprint between p1 and p2 —
-  // a rectangle with semicircular caps on both ends — so each dash reads as a
-  // soft rounded pill rather than a sharp-cornered block.
-  function buildCapsulePolygon(p1, p2, r) {
-    var dxM = (p2[1] - p1[1]) * lngM;
-    var dyM = (p2[0] - p1[0]) * latM;
-    var len = Math.sqrt(dxM * dxM + dyM * dyM) || 0.0001;
-    var dirX = dxM / len, dirY = dyM / len;
-    var perpX = -dirY, perpY = dirX;
-    var steps = 8;
-
-    function toLngLat(anchor, offXm, offYm) {
-      return [anchor[1] + offXm / lngM, anchor[0] + offYm / latM];
-    }
-
-    var pts = [];
-    pts.push(toLngLat(p1, perpX * r, perpY * r));
-    pts.push(toLngLat(p2, perpX * r, perpY * r));
-    // Round cap around p2, sweeping outward (away from p1)
-    for (var k = 1; k < steps; k++) {
-      var ang = (k / steps) * Math.PI;
-      var ox = perpX * Math.cos(ang) + dirX * Math.sin(ang);
-      var oy = perpY * Math.cos(ang) + dirY * Math.sin(ang);
-      pts.push(toLngLat(p2, ox * r, oy * r));
-    }
-    pts.push(toLngLat(p2, -perpX * r, -perpY * r));
-    pts.push(toLngLat(p1, -perpX * r, -perpY * r));
-    // Round cap around p1, sweeping outward (away from p2)
-    for (var k2 = 1; k2 < steps; k2++) {
-      var ang2 = (k2 / steps) * Math.PI;
-      var ox2 = -perpX * Math.cos(ang2) - dirX * Math.sin(ang2);
-      var oy2 = -perpY * Math.cos(ang2) - dirY * Math.sin(ang2);
-      pts.push(toLngLat(p1, ox2 * r, oy2 * r));
-    }
-    pts.push(toLngLat(p1, perpX * r, perpY * r)); // close the ring
-    return pts;
-  }
-
-  var features = [];
-  for (var j = 0; j < n; j++) {
-    var t0 = j / n;
-    var t1 = t0 + (1 / n) * dashFrac; // dash occupies only part of the step, leaving a gap
-
-    var p1 = pointAt(t0), p2 = pointAt(t1);
-    var ring = buildCapsulePolygon(p1, p2, widthM / 2);
-
-    var h1 = heightAt(t0), h2 = heightAt(t1);
-    var base = Math.min(h1, h2);
-    var top  = Math.max(h1, h2);
-    if (top - base < 2) top = base + 2; // keep even near-flat dashes visibly 3-D
-
-    features.push({
-      type:'Feature',
-      properties:{ base:base, height:top },
-      geometry:{ type:'Polygon', coordinates:[ring] }
+// Builds the list of balls for a walk arc: one every step from "from" to "to"
+// (both ends included), lifted along a parabolic height profile so the arc
+// goes "over-and-above". Each ball is {lng, lat, alt, r} in degrees / metres.
+var WALK_BALL_RADIUS_M = 1.8;
+function buildWalkArcBalls(from, to, n) {
+  var distM = haversineMeters(from, to);
+  var maxH  = Math.min(Math.max(distM * 0.18, 8), 40); // clamp: 8-40 m peak
+  var R     = WALK_BALL_RADIUS_M;
+  var count = Math.max(2, n);
+  var balls = [];
+  for (var j = 0; j < count; j++) {
+    var t = j / (count - 1);
+    balls.push({
+      lat: from[0] + (to[0] - from[0]) * t,
+      lng: from[1] + (to[1] - from[1]) * t,
+      alt: R + maxH * Math.sin(Math.PI * t), // lifted one radius so the end balls rest on the ground
+      r:   R
     });
   }
-  return features;
+  return balls;
+}
+
+// Column-major 4x4 multiply (a * b), in double precision
+function mat4mul(a, b) {
+  var out = new Float64Array(16);
+  for (var c = 0; c < 4; c++) {
+    for (var r = 0; r < 4; r++) {
+      var sum = 0;
+      for (var k = 0; k < 4; k++) sum += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = sum;
+    }
+  }
+  return out;
+}
+
+// A MapLibre custom WebGL layer that draws true, smoothly shaded 3-D spheres.
+// (fill-extrusion can only make prisms, never real balls.) One shared unit
+// sphere mesh is drawn once per ball with its own offset + radius, so the
+// balls are round from every angle, bearing and pitch, and sit at real
+// altitude on the arc.
+function createBallLayerImpl(id) {
+  var STACKS = 12, SECTORS = 18;
+  var impl = {
+    id: id,
+    type: 'custom',
+    renderingMode: '3d',
+    mapRef: null,
+    offsets: null,   // Float64Array of [east m, north m, up m, radius m] per ball
+    origin: null,    // {x, y, s} mercator origin + metres->mercator scale
+    count: 0,
+    prog: null, vbo: null, ibo: null, indexCount: 0, loc: {},
+
+    setBalls: function(balls) {
+      var o = maplibregl.MercatorCoordinate.fromLngLat([balls[0].lng, balls[0].lat], 0);
+      var sc = o.meterInMercatorCoordinateUnits();
+      var arr = new Float64Array(balls.length * 4);
+      for (var i = 0; i < balls.length; i++) {
+        var mc = maplibregl.MercatorCoordinate.fromLngLat([balls[i].lng, balls[i].lat], 0);
+        arr[i * 4]     = (mc.x - o.x) / sc;     // east, metres from origin
+        arr[i * 4 + 1] = -(mc.y - o.y) / sc;    // north (mercator y points south)
+        arr[i * 4 + 2] = balls[i].alt;          // up, metres
+        arr[i * 4 + 3] = balls[i].r;
+      }
+      this.offsets = arr;
+      this.count = balls.length;
+      this.origin = { x: o.x, y: o.y, s: sc };
+      if (this.mapRef) this.mapRef.triggerRepaint();
+    },
+
+    onAdd: function(m, gl) {
+      this.mapRef = m;
+
+      function compile(type, src) {
+        var sh = gl.createShader(type);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) console.error('ball shader:', gl.getShaderInfoLog(sh));
+        return sh;
+      }
+      var vs = compile(gl.VERTEX_SHADER,
+        'uniform mat4 u_mvp;' +
+        'uniform vec3 u_offset;' +
+        'uniform float u_radius;' +
+        'attribute vec3 a_pos;' +
+        'varying vec3 v_n;' +
+        'void main() {' +
+        '  v_n = a_pos;' +
+        '  gl_Position = u_mvp * vec4(a_pos * u_radius + u_offset, 1.0);' +
+        '}');
+      var fs = compile(gl.FRAGMENT_SHADER,
+        'precision mediump float;' +
+        'uniform vec3 u_color;' +
+        'varying vec3 v_n;' +
+        'void main() {' +
+        '  vec3 n = normalize(v_n);' +
+        '  vec3 L = normalize(vec3(-0.4, 0.5, 0.8));' +
+        '  float diff = max(dot(n, L), 0.0);' +
+        '  float spec = pow(max(dot(n, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 24.0) * 0.35;' +
+        '  gl_FragColor = vec4(u_color * (0.5 + 0.5 * diff) + vec3(spec), 1.0);' +
+        '}');
+      var prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error('ball program:', gl.getProgramInfoLog(prog));
+      this.prog = prog;
+      this.loc = {
+        pos:    gl.getAttribLocation(prog, 'a_pos'),
+        mvp:    gl.getUniformLocation(prog, 'u_mvp'),
+        offset: gl.getUniformLocation(prog, 'u_offset'),
+        radius: gl.getUniformLocation(prog, 'u_radius'),
+        color:  gl.getUniformLocation(prog, 'u_color')
+      };
+
+      // Unit sphere mesh (z is up)
+      var verts = [], idx = [];
+      for (var i = 0; i <= STACKS; i++) {
+        var phi = Math.PI * i / STACKS;
+        for (var j = 0; j <= SECTORS; j++) {
+          var th = 2 * Math.PI * j / SECTORS;
+          verts.push(Math.sin(phi) * Math.cos(th), Math.sin(phi) * Math.sin(th), Math.cos(phi));
+        }
+      }
+      for (var i2 = 0; i2 < STACKS; i2++) {
+        for (var j2 = 0; j2 < SECTORS; j2++) {
+          var a = i2 * (SECTORS + 1) + j2, b = a + SECTORS + 1;
+          idx.push(a, b, a + 1, a + 1, b, b + 1);
+        }
+      }
+      this.vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+      this.ibo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+      this.indexCount = idx.length;
+    },
+
+    render: function(gl, arg) {
+      if (!this.count || !this.prog) return;
+      // MapLibre v4 passes the matrix directly; v5 wraps it in an args object
+      var m = (arg && arg.defaultProjectionData) ? arg.defaultProjectionData.mainMatrix : arg;
+
+      // metres (east, north, up) from the origin -> mercator coordinates -> clip space
+      var o = this.origin;
+      var model = [
+        o.s, 0, 0, 0,
+        0, -o.s, 0, 0,
+        0, 0, o.s, 0,
+        o.x, o.y, 0, 1
+      ];
+      var mvp = mat4mul(m, model);
+
+      gl.useProgram(this.prog);
+      gl.uniformMatrix4fv(this.loc.mvp, false, new Float32Array(mvp));
+      gl.uniform3f(this.loc.color, 0.063, 0.725, 0.506); // #10B981
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+      gl.enableVertexAttribArray(this.loc.pos);
+      gl.vertexAttribPointer(this.loc.pos, 3, gl.FLOAT, false, 0, 0);
+
+      for (var i = 0; i < this.count; i++) {
+        gl.uniform3f(this.loc.offset, this.offsets[i * 4], this.offsets[i * 4 + 1], this.offsets[i * 4 + 2]);
+        gl.uniform1f(this.loc.radius, this.offsets[i * 4 + 3]);
+        gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
+      }
+      gl.disableVertexAttribArray(this.loc.pos);
+    },
+
+    onRemove: function(m, gl) {
+      if (this.vbo) gl.deleteBuffer(this.vbo);
+      if (this.ibo) gl.deleteBuffer(this.ibo);
+      if (this.prog) gl.deleteProgram(this.prog);
+      this.vbo = this.ibo = this.prog = null;
+      this.mapRef = null;
+    }
+  };
+  return impl;
+}
+
+// Adds / updates / removes a ball layer by id. Passing no balls removes it.
+// Also re-creates the layer after a style swap (setStyle wipes all layers).
+var ballLayerImpls = {};
+function setBallLayer(id, balls) {
+  var exists = !!map.getLayer(id);
+  if (!balls || !balls.length) {
+    if (exists) map.removeLayer(id);
+    delete ballLayerImpls[id];
+    return;
+  }
+  if (exists && ballLayerImpls[id]) {
+    ballLayerImpls[id].setBalls(balls);
+    return;
+  }
+  var impl = createBallLayerImpl(id);
+  impl.setBalls(balls);
+  ballLayerImpls[id] = impl;
+  map.addLayer(impl);
 }
 
 // Small hex→rgba helper (used for the pulse ring around the user location dot)
@@ -1207,17 +1443,17 @@ function drawUserLocation() {
   }
 
   var wrap = document.createElement('div');
-  wrap.style.cssText = 'width:22px;height:22px;position:relative; z-index:1000;';
+  wrap.style.cssText = 'width:30px;height:30px;position:relative; z-index:1000;';
 
   var pulse = document.createElement('div');
   pulse.style.cssText =
-    'position:absolute;top:50%;left:50%;width:22px;height:22px;' +
+    'position:absolute;top:50%;left:50%;width:30px;height:30px;' +
     'transform:translate(-50%,-50%);border-radius:50%;' +
     'background:' + hexToRgba(PRIMARY_COLOR, 0.35) + ';animation:userLocPulse 1.8s ease-out infinite;';
 
   var dot = document.createElement('div');
   dot.style.cssText =
-    'position:absolute;top:50%;left:50%;width:14px;height:14px;' +
+    'position:absolute;top:50%;left:50%;width:20px;height:20px;' +
     'transform:translate(-50%,-50%);border-radius:50%;' +
     'background:' + PRIMARY_COLOR + ';border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
 
@@ -1248,7 +1484,7 @@ function drawUserLocation() {
 function drawStops() {
   stopMarkers.forEach(function(m) { m.remove(); });
   stopMarkers = [];
-  if (!mapReady) return;
+  if (!mapReady || routeHidden) return;
 
   allStops.forEach(function(stop, i) {
     var isFirst = i === 0;
@@ -1692,7 +1928,7 @@ function drawStopPhotoBadges() {
   photoMarkers.forEach(function(m) { m.remove(); });
   photoMarkers = [];
   photoBadgeEls = {};
-  if (!mapReady) return;
+  if (!mapReady || routeHidden) return;
 
   allStops.forEach(function(stop, i) {
     if (!stop.id) return; // can't attach/upload photos without a real stop id
@@ -1913,14 +2149,29 @@ window.addEventListener('message', function(e) {
     }
   }
   if (e.data.type === 'FLY_TO_ROUTE') {
-    if (routeBounds && mapReady) {
-      map.fitBounds(routeBounds, { padding: 60, animate: true, duration: 800 });
+    if (routeBounds && mapReady && !routeHidden) {
+      map.fitBounds(routeBounds, { padding: routeFitPadding(), animate: true, duration: 800 });
+    }
+  }
+  if (e.data.type === 'SET_VOLUNTEER_MODE') {
+    VOLUNTEER_MODE = !!e.data.value;
+    if (mapReady) map.getCanvas().style.cursor = VOLUNTEER_MODE ? 'crosshair' : '';
+    if (VOLUNTEER_MODE && !routeHidden) hideRoute();
+    else if (!VOLUNTEER_MODE && routeHidden) showRoute();
+  }
+  if (e.data.type === 'SET_ROUTE_PADDING' && Number.isFinite(e.data.bottom)) {
+    var newPad = Math.max(0, Math.round(e.data.bottom));
+    var padChanged = Math.abs(newPad - routeBottomPad) > 1;
+    routeBottomPad = newPad;
+    if (padChanged && e.data.refit && routeBounds && mapReady && !routeHidden) {
+      map.fitBounds(routeBounds, { padding: routeFitPadding(), animate: true, duration: 500 });
     }
   }
   if (e.data.type === 'FLY_TO_STOP') {
     var hStop = e.data.stop;
     if (mapReady && hStop && typeof hStop.lat === 'number' && typeof hStop.lng === 'number') {
-      map.flyTo({ center: [hStop.lng, hStop.lat], zoom: Math.max(map.getZoom(), 16), essential: true });
+      var offsetY = Number.isFinite(e.data.offsetY) ? e.data.offsetY : 0;
+      map.flyTo({ center: [hStop.lng, hStop.lat], zoom: Math.max(map.getZoom(), 16), offset: [0, offsetY], essential: true });
       drawHighlightStop(hStop);
     }
   }
@@ -1930,6 +2181,7 @@ window.addEventListener('message', function(e) {
   if (e.data.type === 'USER_LOCATION_UPDATE') {
     userLoc = e.data.location || null;
     drawUserLocation();
+    refreshUserWalkArc();
   }
   if (e.data.type === 'STOP_IMAGES_SYNC') {
     stopImagesMap = e.data.images || {};
@@ -1953,7 +2205,7 @@ window.addEventListener('message', function(e) {
 </body>
 </html>`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [center, routeCoordinates, stops, primaryColor, volunteerMode]);
+  }, [center, routeCoordinates, stops, primaryColor]);
   const html = useMemo(() => generateHTML(), [generateHTML]);
 
   const [blobUrl, setBlobUrl] = useState(null);
