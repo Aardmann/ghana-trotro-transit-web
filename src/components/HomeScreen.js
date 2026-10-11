@@ -9,7 +9,7 @@ import {
   Tv, Building, Package, AlertCircle, CalendarDays,
   Wind, Type, RefreshCw, Radio, Flag, Check, Coins,
   Eye, EyeOff, Heart, Users, ImagePlus, Camera, LogIn, Download, Edit3,
-  Menu, TrendingUp, Compass, MessageCircle, Bell, Sun, Moon, Bookmark
+  Menu, TrendingUp, Compass, MessageCircle, Bell, Sun, Moon, Bookmark, Smartphone, Pencil
 } from 'lucide-react';
 import { supabase } from '../config/supabase';
 import {
@@ -69,6 +69,11 @@ const SHEET_MIN_FULL_PX = 420; // short windows: never let "full" be too small t
 const SHEET_TOP_GAP_PX = 56; // always leave at least this much map visible above a full sheet
 const SHEET_ROUTE_FULL_VH_MIN = 42; // route content: dynamic full snap is clamped to this range
 const SHEET_ROUTE_FULL_VH_MAX = 88;
+
+// After a recent search resolves, how long (ms) the sheet's loading view stays
+// up so the map has time to draw/fit the route behind it. MapComponent doesn't
+// report "route drawn", so this is the stand-in for that signal.
+const ROUTE_DRAW_SETTLE_MS = 450;
 
 // Returns the three resting heights [peek, half, full] in vh of `viewportH`.
 // Pass the selected route (or null) - a route's full snap grows with its
@@ -1799,6 +1804,15 @@ const GhanaTrotroTransit = () => {
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [isFindingRoutes, setIsFindingRoutes] = useState(false);
+  // Set while a tapped Recent Search is being turned into a drawn route. The
+  // bottom sheet shows a loading view (spinner, text, cancel X) for as long as
+  // this is non-null. { start, destination, ready } - `ready` flips to true
+  // once the route has been found and selected, after which the view lingers
+  // for ROUTE_DRAW_SETTLE_MS while the map draws it.
+  const [recentSearchLoading, setRecentSearchLoading] = useState(null);
+  // Bumped by every findRoutes call and by cancelling; an in-flight search
+  // whose token is no longer current drops its results instead of applying them.
+  const routeSearchTokenRef = useRef(0);
 
   // Refs
   const startInputRef = useRef(null);
@@ -1895,13 +1909,16 @@ const GhanaTrotroTransit = () => {
   // destination bar used), regardless of which content is currently showing.
   const isSheetExpanded = sheetDragHeight > sheetSnaps[0] + 0.5;
 
-  // True once the sheet's top edge has reached the vertical middle of the
-  // SCREEN (not the sheet's own half snap). sheetDragHeight is in vh of
-  // window.innerHeight, so 50 is exactly half the screen. The top-actions row
-  // (compass, layer toggle, info, locate, Google Maps, recenter-route)
-  // compacts past this point so it doesn't crowd the content as the sheet
-  // grows taller.
-  const isSheetPastHalfway = sheetDragHeight >= 50;
+  // True once the sheet has reached its half snap (index 1) or anything
+  // taller - or the vertical middle of the SCREEN (50vh), whichever comes
+  // first. sheetDragHeight is in vh of window.innerHeight. Past this point
+  // the top-actions row drops its outer buttons (compass, 3D/2D, info,
+  // Google Maps) and keeps only the combined layer/route/locate pill, so it
+  // doesn't crowd the content as the sheet grows taller. Measured on the live
+  // drag height (not sheetSnapIndex) so the buttons also fade back in as
+  // soon as the sheet is dragged below the half snap, without waiting for
+  // release. The -1 absorbs rounding at the snap itself.
+  const isSheetPastHalfway = sheetDragHeight >= Math.min(50, sheetSnaps[1] - 1);
 
   // True once the sheet is at (or nearly at) its full snap height - the
   // control cluster (compass, 3D, layer toggle, info, locate, etc.) hides
@@ -1999,6 +2016,27 @@ const GhanaTrotroTransit = () => {
     d.currentH = sheetSnaps[idx];
     d.startH = sheetSnaps[idx];
   }, [sheetSnaps, selectedRoute]);
+
+  // Volunteer mode (tap the map to add / re-pin a stop) needs the whole map
+  // visible, so drop the sheet to its peek snap (index 0) as soon as the mode
+  // starts. Runs only on entering the mode, so the user can still drag the
+  // sheet back up afterwards, and leaving the mode doesn't move it.
+  const isPickingOnMap = volunteerMode || pickingUpdateLocation;
+  useEffect(() => {
+    if (!isPickingOnMap) return;
+    const d = sheetDragRef.current;
+    const peekH = (d.snapHeights || SNAP_HEIGHTS)[0];
+    setSheetSnapIndex(0);
+    setSheetDragHeight(peekH);
+    d.currentH = peekH;
+    d.startH = peekH;
+    // Parked at peek there's no room for the keyboard, so drop focus too
+    // (same as when the sheet is dragged all the way down).
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && bottomSheetRef.current?.contains(focused)) {
+      focused.blur?.();
+    }
+  }, [isPickingOnMap]);
 
   // Memoized map data to prevent unnecessary re-renders
   const memoizedRouteCoordinates = useMemo(() => {
@@ -4017,14 +4055,20 @@ const GhanaTrotroTransit = () => {
 
     if (!searchStart || !searchDest) {
       alert('Error: Please enter both start and destination points');
-      return;
+      return false;
     }
+
+    // Each search gets a token; cancelling (or starting another search) makes
+    // it stale, and a stale search stops applying results.
+    const token = ++routeSearchTokenRef.current;
+    const isCancelled = () => token !== routeSearchTokenRef.current;
 
     // Indicate that route search is in progress
     setIsFindingRoutes(true);
 
     // Save to search history
     await saveSearchHistory(searchStart, searchDest);
+    if (isCancelled()) return false;
 
     try {
       console.log('Searching for routes from:', searchStart, 'to:', searchDest);
@@ -4048,13 +4092,15 @@ const GhanaTrotroTransit = () => {
         console.error('Supabase error:', error);
         throw error;
       }
+      if (isCancelled()) return false;
 
       console.log('Fetched routes from database:', routesData);
 
       if (!routesData || routesData.length === 0) {
         await logUnmatchedSearch(searchStart, searchDest);
+        if (isCancelled()) return false;
         setShowRouteNotFoundModal(true);
-        return;
+        return false;
       }
 
       // Filter routes that match the search criteria
@@ -4072,12 +4118,14 @@ const GhanaTrotroTransit = () => {
 
       if (matchingRoutes.length === 0) {
         await logUnmatchedSearch(searchStart, searchDest);
+        if (isCancelled()) return false;
         setShowRouteNotFoundModal(true);
-        return;
+        return false;
       }
 
       // Format the routes for the app (handles composite routes)
       const formattedRoutes = await Promise.all(matchingRoutes.map(route => formatRoute(route)));
+      if (isCancelled()) return false;
 
       // Cache routes
       routesCacheRef.current = formattedRoutes;
@@ -4089,17 +4137,69 @@ const GhanaTrotroTransit = () => {
       
       // Fetch route info for the selected route
       await fetchRouteInfo(firstRoute.id);
+      if (isCancelled()) return false;
       
       setBottomSheetContent('route');
       setLastUpdateTime(new Date());
+      return true;
       
     } catch (error) {
+      if (isCancelled()) return false;
       console.error('Error finding routes:', error);
       alert('Error searching for routes. Please try again.');
+      return false;
     } finally {
-      setIsFindingRoutes(false);
+      // A cancelled search already reset this (and a newer search owns it now).
+      if (!isCancelled()) setIsFindingRoutes(false);
     }
   }, [startPoint, destination, saveSearchHistory, fetchRouteInfo, logUnmatchedSearch]);
+
+  // ── Recent search tap → loading view in the sheet ─────────────────────────
+  // Tapping a Recent Search runs the normal route search, but the sheet shows
+  // a loading view ("Loading route..." + a cancel X) from the tap until the
+  // route is found, selected and had a moment to be drawn on the map.
+  const handleRecentSearchTap = useCallback(async (search) => {
+    setSuggestions([]);
+    setStartPoint(search.start_point);
+    setDestination(search.destination);
+    setRecentSearchLoading({ start: search.start_point, destination: search.destination, ready: false });
+
+    const pending = findRoutes(search.start_point, search.destination);
+    // findRoutes takes its token synchronously, so this is that search's token.
+    const token = routeSearchTokenRef.current;
+    const found = await pending;
+
+    // Cancelled (or superseded) while loading - the cancel handler already
+    // cleaned up, so leave everything as it is.
+    if (token !== routeSearchTokenRef.current) return;
+
+    if (found) {
+      setRecentSearchLoading((prev) => (prev ? { ...prev, ready: true } : prev));
+    } else {
+      // No route / error - findRoutes already told the user why.
+      setRecentSearchLoading(null);
+    }
+  }, [findRoutes]);
+
+  // The X on the loading view: abandon the search, drop anything it had
+  // already selected, and go back to the destination content.
+  const cancelRecentSearchLoading = useCallback(() => {
+    routeSearchTokenRef.current += 1; // makes the in-flight search stale
+    setIsFindingRoutes(false);
+    setRecentSearchLoading(null);
+    setSelectedRoute(null);
+    setRoutes([]);
+    routesCacheRef.current = null;
+    setBottomSheetContent('destination');
+  }, []);
+
+  // Route found and selected: keep the loading view up briefly so it doesn't
+  // vanish before the map has drawn the route, then reveal the route sheet.
+  useEffect(() => {
+    if (!recentSearchLoading?.ready) return undefined;
+    const t = setTimeout(() => setRecentSearchLoading(null), ROUTE_DRAW_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [recentSearchLoading?.ready]);
 
   // ── Explore drawer data ──────────────────────────────────────────────
   // Pulls a batch of routes (same shape as the search flow, via
@@ -5971,12 +6071,7 @@ const GhanaTrotroTransit = () => {
                 <button
                   key={search.id}
                   className="recent-search-item"
-                  onClick={() => {
-                    setSuggestions([]);
-                    setStartPoint(search.start_point);
-                    setDestination(search.destination);
-                    findRoutes(search.start_point, search.destination);
-                  }}
+                  onClick={() => handleRecentSearchTap(search)}
                 >
                   <div className="recent-search-icon">
                     <History size={14} color={COLORS.primary} />
@@ -6095,7 +6190,7 @@ const GhanaTrotroTransit = () => {
         </div>
       </div>
     </div>
-  ), [destination, suggestions, searchHistory, popularRoutes, locationsNearby, exploreLoading, userLocation, user, ensureConnected, fetchSuggestions, handleDestBarSearch, findRoutes, openStopDetail, handleExploreRouteSelect, raiseSheetToHalfOnFocus]);
+  ), [destination, suggestions, searchHistory, popularRoutes, locationsNearby, exploreLoading, userLocation, user, ensureConnected, fetchSuggestions, handleDestBarSearch, findRoutes, handleRecentSearchTap, openStopDetail, handleExploreRouteSelect, raiseSheetToHalfOnFocus]);
 
   // ── Stop detail content ────────────────────────────────────────────────
   // Shown after picking a stop from the destination content (search
@@ -6404,6 +6499,32 @@ const GhanaTrotroTransit = () => {
   }, [stopSearchResults, closeStopSearchResults, destination, suggestions, ensureConnected, fetchSuggestions, handleDestBarSearch, expandSheetFromPeek, raiseSheetToHalfOnFocus, userLocation, nearbyStops, handleStopDetailDirectionsFor, openStopDetail, openResultLightbox]);
 
   const renderBottomSheetContent = useCallback(() => {
+    // A tapped Recent Search is loading: take over the whole sheet until the
+    // route is ready and drawn (or the user cancels with the X).
+    if (recentSearchLoading) {
+      return (
+        <div className="route-loading-view" role="status" aria-live="polite">
+          <button
+            type="button"
+            className="route-loading-cancel"
+            onClick={cancelRecentSearchLoading}
+            aria-label="Cancel loading route"
+            title="Cancel"
+          >
+            <X size={18} strokeWidth={2.5} />
+          </button>
+          <div className="route-loading-body">
+            <RefreshCw className="route-loading-spinner" size={28} color={COLORS.primary} />
+            <span className="route-loading-text">Loading route...</span>
+            <span className="route-loading-sub">
+              {recentSearchLoading.start}
+              <span className="recent-search-arrow"> → </span>
+              {recentSearchLoading.destination}
+            </span>
+          </div>
+        </div>
+      );
+    }
     if (bottomSheetContent === 'destination') {
       return renderDestinationContent();
     }
@@ -6444,7 +6565,7 @@ const GhanaTrotroTransit = () => {
           : renderRouteInfo()}
       </div>
     );
-  }, [bottomSheetContent, bottomSheetState, renderDestinationContent, renderStopDetailContent, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
+  }, [recentSearchLoading, cancelRecentSearchLoading, bottomSheetContent, bottomSheetState, renderDestinationContent, renderStopDetailContent, renderSearchForm, renderRouteDetails, renderRouteInfo, swipeTranslate, isSwipeActive]);
 
   // ── Cookie consent required screen ──────────────────────────────────
   // Cookies cannot be declined - if the user chooses not to accept,
@@ -6629,7 +6750,7 @@ const GhanaTrotroTransit = () => {
             onClick={() => { setDownloadAppModalReason('generic'); setShowDownloadAppModal(true); }}
             aria-label="Get the app"
           >
-            <svg fill="var(--primary-color)" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M12.25 0h-8.5A1.25 1.25 0 0 0 2.5 1.25v13.5A1.25 1.25 0 0 0 3.75 16h8.5a1.25 1.25 0 0 0 1.25-1.25V1.25A1.25 1.25 0 0 0 12.25 0zm0 14.75h-8.5V1.25h8.5z"/><ellipse cx="8" cy="12.75" rx=".8" ry=".75"/></svg>
+            <Smartphone size={24} color={COLORS.primary} strokeWidth={2} />
           </button>
         </>
       )}
@@ -7183,18 +7304,34 @@ const GhanaTrotroTransit = () => {
                         {userProfile?.first_name?.[0]}{userProfile?.last_name?.[0] || user.email?.[0]?.toUpperCase()}
                       </span>
                     </div>
-                    <span className="ios-user-name">
-                      {userProfile?.first_name} {userProfile?.last_name}
-                      {(userProfile?.contribution_count || 0) > CONTRIBUTOR_BADGE_THRESHOLD && (
-                        <img
-                          className="ios-contributor-badge"
-                          src={contributorBadgeIcon}
-                          alt="Top contributor badge"
-                          title={`Top contributor · ${userProfile.contribution_count} contributions`}
-                        />
-                      )}
-                    </span>
-                    <span className="ios-user-email">{user.email}</span>
+                    <div className="ios-user-text">
+                      <span className="ios-user-name">
+                        {userProfile?.first_name} {userProfile?.last_name}
+                        {(userProfile?.contribution_count || 0) > CONTRIBUTOR_BADGE_THRESHOLD && (
+                          <img
+                            className="ios-contributor-badge"
+                            src={contributorBadgeIcon}
+                            alt="Top contributor badge"
+                            title={`Top contributor · ${userProfile.contribution_count} contributions`}
+                          />
+                        )}
+                      </span>
+                      <span className="ios-user-email">{user.email}</span>
+                    </div>
+
+                    {/* Edit - jumps straight to the Account section. Only on
+                        the main menu; the account view is already that. */}
+                    {profileView === 'menu' && (
+                      <button
+                        type="button"
+                        className="ios-user-edit-button"
+                        onClick={handleOpenAccountView}
+                        aria-label="Edit account"
+                        title="Edit account"
+                      >
+                        <Pencil size={18} color={COLORS.primary} strokeWidth={2.2} />
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -8739,7 +8876,7 @@ const GhanaTrotroTransit = () => {
               <div className="sign-out-success-icon">
                 <CheckCircle size={40} color="#10B981" />
               </div>
-              <h3 className="sign-out-success-title">Signed out successfully</h3>
+              <h3 className="sign-out-success-title">hmmm! you signed out</h3>
               <button
                 className="sign-out-success-button"
                 onClick={() => setShowSignOutSuccessModal(false)}

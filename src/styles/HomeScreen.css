@@ -79,8 +79,7 @@ body {
   right: 20px;
   width: 40px;
   height: 40px;
-  padding-left: 8px;
-  padding-top: 8px;
+  padding: 0;
   background-color: #ffffff;
   border: none;
   border-radius: 50%;
@@ -1374,20 +1373,56 @@ body {
 
 .ios-user-info {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
+  gap: 14px;
   padding: 20px 16px 24px;
+}
+
+/* Name above email, stacked to the right of the avatar. min-width: 0 lets
+   long names/emails wrap inside the row instead of pushing it wider. */
+.ios-user-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pencil on the right edge of the user row - opens the Account section. */
+.ios-user-edit-button {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #F2F2F7;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.ios-user-edit-button:hover {
+  background: #E5E5EA;
+}
+
+.ios-user-edit-button:active {
+  transform: scale(0.92);
 }
 
 .ios-avatar {
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #8B5CF6, #6b21a8);
+  background: #6b21a8;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 10px;
+  flex-shrink: 0;
   box-shadow: 0 4px 12px rgba(107, 33, 168, 0.28);
 }
 
@@ -1403,7 +1438,7 @@ body {
   color: #1C1C1E;
   letter-spacing: -0.2px;
   margin-bottom: 2px;
-  text-align: center;
+  text-align: left;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1507,7 +1542,8 @@ body {
 .ios-user-email {
   font-size: 14px;
   color: #8E8E93;
-  text-align: center;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .ios-list-group {
@@ -6586,11 +6622,17 @@ body, #root {
   padding-bottom: 4px;
 }
 
+/* Same layout as .ios-user-info: icon on the left, title with the subtitle
+   directly below it on the right. A two-row grid (icon spans both rows) so
+   the existing markup - icon, title, subtitle as siblings - needs no changes. */
 .ios-auth-header {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
   align-items: center;
-  text-align: center;
+  column-gap: 14px;
+  text-align: left;
   padding: 4px 8px 20px;
 }
 
@@ -6598,26 +6640,37 @@ body, #root {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #8B5CF6, #6b21a8);
+  background: #6b21a8;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  flex-shrink: 0;
+  grid-column: 1;
+  grid-row: 1 / span 2;
   box-shadow: 0 4px 12px rgba(107, 33, 168, 0.28);
 }
 
 .ios-auth-title {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
   font-size: 19px;
   font-weight: 700;
   color: #1C1C1E;
   letter-spacing: -0.2px;
-  margin: 0 0 4px;
+  margin: 0 0 2px;
+  text-align: left;
 }
 
 .ios-auth-subtitle {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
   font-size: 14px;
   color: #8E8E93;
   margin: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 /* Segmented Sign In / Sign Up tabs */
@@ -8019,4 +8072,78 @@ body, #root {
 .route-details .stops-title-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Route loading view - fills the bottom sheet from the moment a Recent
+   Search is tapped until the route is found and drawn on the map (see
+   recentSearchLoading in HomeScreen.js). The X cancels the search.
+══════════════════════════════════════════════════════════ */
+.route-loading-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 56px;
+}
+
+.route-loading-cancel {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.route-loading-cancel:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.route-loading-cancel:active {
+  transform: scale(0.92);
+}
+
+.route-loading-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  min-width: 0;
+}
+
+.route-loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+.route-loading-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.route-loading-sub {
+  max-width: 100%;
+  font-size: 13px;
+  color: var(--text-light);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading-spinner { animation-duration: 2.4s; }
 }
